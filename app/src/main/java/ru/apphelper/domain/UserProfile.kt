@@ -1,5 +1,7 @@
 package ru.apphelper.domain
 
+import ru.apphelper.profile.ProfilePriorities
+
 enum class AssistanceMode {
     LOW_VISION,
     SIMPLE_PHONE,
@@ -51,6 +53,8 @@ data class UserProfile(
     val speech: SpeechPreferences = SpeechPreferences(),
     val permissions: UserPermissions = UserPermissions(),
     val care: CarePreferences = CarePreferences(),
+    /** Весовые приоритеты функций 0–100. Не являются диагнозом или возрастной категорией. */
+    val priorities: ProfilePriorities = ProfilePriorities(),
     val interests: Set<String> = emptySet(),
     val trustedContact: TrustedContact? = null,
     val safePlaces: List<SafePlace> = emptyList(),
