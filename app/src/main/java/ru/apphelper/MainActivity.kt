@@ -35,6 +35,8 @@ import ru.apphelper.data.UserProfileStore
 import ru.apphelper.dialog.VoiceCommand
 import ru.apphelper.dialog.VoiceCommandRouter
 import ru.apphelper.domain.UserProfile
+import ru.apphelper.journal.EventJournal
+import ru.apphelper.journal.JournalEventType
 import ru.apphelper.notifications.NotificationEvent
 import ru.apphelper.notifications.NotificationEventStore
 import ru.apphelper.ui.onboarding.AppHelperTheme
@@ -45,6 +47,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val store = UserProfileStore(this)
+        val journal = EventJournal(this)
 
         setContent {
             AppHelperTheme {
@@ -67,9 +70,15 @@ class MainActivity : ComponentActivity() {
                 }
                 var latestCall by remember { mutableStateOf<CallEvent?>(null) }
                 var awaitingNotificationCommand by remember { mutableStateOf(false) }
+                var listeningForGeneralCommand by remember { mutableStateOf(false) }
                 var lastPrompt by remember { mutableStateOf<String?>(null) }
 
                 lateinit var voice: AndroidVoiceAssistant
+
+                fun speak(text: String) {
+                    voice.setSpeechRate(if (profile.speech.slowerSpeech) 0.78f else 1.0f)
+                    voice.speak(text)
+                }
 
                 fun speakAndListen(prompt: String) {
                     lastPrompt = prompt
@@ -89,33 +98,86 @@ class MainActivity : ComponentActivity() {
                             val sender = event.sender.ifBlank { event.appName }
                             "$sender. ${event.text}"
                         }
-                        voice.speak(spoken)
+                        speak(spoken)
                         latestEvent = null
+                    }
+                }
+
+                fun speakMissedEvents() {
+                    val events = journal.unread(limit = 10)
+                    if (events.isEmpty()) {
+                        speak("Новых пропущенных событий нет.")
+                        return
+                    }
+
+                    val notifications = events.count { it.type == JournalEventType.NOTIFICATION }
+                    val calls = events.count { it.type == JournalEventType.CALL }
+                    val intro = buildString {
+                        append("Вы пропустили ")
+                        val parts = mutableListOf<String>()
+                        if (calls > 0) parts += "$calls звонков"
+                        if (notifications > 0) parts += "$notifications сообщений и уведомлений"
+                        append(parts.joinToString(" и "))
+                        append(". ")
+                    }
+                    val details = events.take(5).joinToString(". ") { event ->
+                        when (event.type) {
+                            JournalEventType.CALL -> "Звонок от ${event.title}"
+                            JournalEventType.NOTIFICATION -> {
+                                if (event.body.isBlank()) "Сообщение от ${event.title} в ${event.source}"
+                                else "${event.source}, ${event.title}: ${event.body}"
+                            }
+                        }
+                    }
+                    speak(intro + details)
+                    journal.markReviewed(events.map { it.id })
+                }
+
+                fun handleRecognized(recognized: String) {
+                    val command = VoiceCommandRouter.parse(recognized)
+
+                    if (command == VoiceCommand.MISSED) {
+                        awaitingNotificationCommand = false
+                        listeningForGeneralCommand = false
+                        speakMissedEvents()
+                        return
+                    }
+
+                    if (awaitingNotificationCommand) {
+                        when (command) {
+                            VoiceCommand.READ -> readLatestNotification()
+                            VoiceCommand.LATER -> {
+                                awaitingNotificationCommand = false
+                                latestEvent = null
+                                speak("Хорошо. Оставлю на потом.")
+                            }
+                            VoiceCommand.REPEAT -> lastPrompt?.let(::speakAndListen)
+                            VoiceCommand.MISSED -> Unit
+                            VoiceCommand.UNKNOWN -> {
+                                speakAndListen("Не понял ответ. Скажите: прочитай, позже или повтори.")
+                            }
+                        }
+                        return
+                    }
+
+                    if (listeningForGeneralCommand) {
+                        listeningForGeneralCommand = false
+                        when (command) {
+                            VoiceCommand.MISSED -> speakMissedEvents()
+                            VoiceCommand.REPEAT -> lastPrompt?.let(::speak)
+                            else -> speak("Пока я понимаю команду: что я пропустил.")
+                        }
                     }
                 }
 
                 voice = remember {
                     AndroidVoiceAssistant(
                         context = this,
-                        onRecognized = { recognized ->
-                            if (awaitingNotificationCommand) {
-                                when (VoiceCommandRouter.parse(recognized)) {
-                                    VoiceCommand.READ -> readLatestNotification()
-                                    VoiceCommand.LATER -> {
-                                        awaitingNotificationCommand = false
-                                        latestEvent = null
-                                        voice.speak("Хорошо. Оставлю на потом.")
-                                    }
-                                    VoiceCommand.REPEAT -> lastPrompt?.let(::speakAndListen)
-                                    VoiceCommand.UNKNOWN -> {
-                                        speakAndListen("Не понял ответ. Скажите: прочитай, позже или повтори.")
-                                    }
-                                }
-                            }
-                        },
+                        onRecognized = ::handleRecognized,
                         onError = { error ->
                             voiceError = error
                             awaitingNotificationCommand = false
+                            listeningForGeneralCommand = false
                         },
                     )
                 }
@@ -125,7 +187,7 @@ class MainActivity : ComponentActivity() {
                         latestEvent = event
                         val sender = event.sender.ifBlank { event.appName }
                         val prompt = "Новое сообщение в ${event.appName} от $sender. Прочитать?"
-                        if (microphoneGranted) speakAndListen(prompt) else voice.speak(prompt)
+                        if (microphoneGranted) speakAndListen(prompt) else speak(prompt)
                     }
                     val callListener: (CallEvent) -> Unit = { event ->
                         latestCall = event
@@ -133,8 +195,7 @@ class MainActivity : ComponentActivity() {
                             val spokenCaller = event.displayName
                                 ?: event.phoneNumber.takeIf { it.isNotBlank() }
                                 ?: "неизвестный номер"
-                            voice.setSpeechRate(if (profile.speech.slowerSpeech) 0.78f else 1.0f)
-                            voice.speak("Входящий звонок. $spokenCaller.")
+                            speak("Входящий звонок. $spokenCaller.")
                         }
                     }
                     NotificationEventStore.addListener(notificationListener)
@@ -209,14 +270,24 @@ class MainActivity : ComponentActivity() {
                                 awaitingNotificationCommand = false
                                 latestEvent = null
                             },
+                            onMissed = { speakMissedEvents() },
+                            onListen = {
+                                if (microphoneGranted) {
+                                    listeningForGeneralCommand = true
+                                    lastPrompt = "Слушаю."
+                                    speak("Слушаю.")
+                                    voice.startListening()
+                                } else {
+                                    microphoneLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                }
+                            },
                             onSpeak = {
-                                voice.setSpeechRate(if (profile.speech.slowerSpeech) 0.78f else 1.0f)
                                 val greeting = if (profile.displayName.isBlank()) {
                                     "Здравствуйте. Я готов помочь."
                                 } else {
                                     "Здравствуйте, ${profile.displayName}. Я готов помочь."
                                 }
-                                voice.speak(greeting)
+                                speak(greeting)
                             },
                         )
                     }
@@ -238,6 +309,8 @@ private fun HomeScreen(
     onRequestCallScreeningRole: () -> Unit,
     onReadNotification: () -> Unit,
     onLater: () -> Unit,
+    onMissed: () -> Unit,
+    onListen: () -> Unit,
     onSpeak: () -> Unit,
 ) {
     Column(
@@ -246,6 +319,14 @@ private fun HomeScreen(
     ) {
         Text("Помощник готов", fontSize = 30.sp)
         Text("Профиль ${profile.displayName.ifBlank { "пользователя" }} активен.", fontSize = 20.sp)
+
+        Button(onClick = onListen, modifier = Modifier.fillMaxWidth().height(72.dp)) {
+            Text("Слушаю", fontSize = 22.sp)
+        }
+
+        Button(onClick = onMissed, modifier = Modifier.fillMaxWidth().height(64.dp)) {
+            Text("Что я пропустил?", fontSize = 20.sp)
+        }
 
         Button(
             onClick = onEnableNotificationAccess,
