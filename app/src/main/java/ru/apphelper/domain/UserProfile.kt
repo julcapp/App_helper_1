@@ -40,6 +40,8 @@ data class UserProfile(
     val interests: Set<String> = emptySet(),
     val trustedContact: TrustedContact? = null,
     val safePlaces: List<SafePlace> = emptyList(),
+    /** Текущий город, подтверждённый пользователем голосом или через интерфейс. */
+    val currentCityName: String = "",
     val primaryLanguage: String = "ru",
     val travelLanguages: Set<String> = setOf("es"),
     val onboardingCompleted: Boolean = false,
