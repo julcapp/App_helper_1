@@ -40,14 +40,25 @@ object TransitVoiceGuide {
         }
     }
 
+    fun stopsRemainingAlert(leg: TransitLeg, stopsRemaining: Int): String? {
+        val destination = leg.to?.name?.takeIf { it.isNotBlank() } ?: "нужной остановке"
+        return when {
+            stopsRemaining == 2 -> "Через две остановки нужно выходить на $destination."
+            stopsRemaining == 1 -> "Следующая остановка — ваша: $destination. Приготовьтесь выходить."
+            stopsRemaining == 0 -> "Выходите на остановке $destination."
+            else -> null
+        }
+    }
+
     private fun vehicleLeg(leg: TransitLeg): String = buildString {
         append(modeName(leg.mode))
-        leg.routeName?.takeIf { it.isNotBlank() }?.let { append(" $it") }
+        leg.routeNumber?.takeIf { it.isNotBlank() }?.let { append(" номер $it") }
+            ?: leg.routeName?.takeIf { it.isNotBlank() }?.let { append(" $it") }
         leg.headsign?.takeIf { it.isNotBlank() }?.let { append(" в направлении $it") }
-        leg.from?.name?.takeIf { it.isNotBlank() }?.let { append(". Посадка: $it") }
+        leg.from?.name?.takeIf { it.isNotBlank() }?.let { append(". Дождитесь транспорта и садитесь на остановке $it") }
         leg.from?.platform?.takeIf { it.isNotBlank() }?.let { append(", платформа $it") }
-        leg.stopCount?.takeIf { it > 0 }?.let { append(". Проедьте $it остановок") }
-        leg.to?.name?.takeIf { it.isNotBlank() }?.let { append(" до $it") }
+        leg.stopCount?.takeIf { it > 0 }?.let { append(". Нужно проехать $it остановок") }
+        leg.to?.name?.takeIf { it.isNotBlank() }?.let { append(" и выйти на $it") }
         leg.to?.platform?.takeIf { it.isNotBlank() }?.let { append(", прибытие к платформе $it") }
         append(".")
     }
