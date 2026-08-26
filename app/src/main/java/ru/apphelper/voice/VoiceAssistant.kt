@@ -6,6 +6,7 @@ package ru.apphelper.voice
  */
 interface VoiceAssistant {
     fun speak(text: String)
+    fun setSpeechRate(rate: Float)
     fun startListening()
     fun stopListening()
     fun release()
