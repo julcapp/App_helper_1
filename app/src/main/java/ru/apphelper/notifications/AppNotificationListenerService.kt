@@ -3,6 +3,7 @@ package ru.apphelper.notifications
 import android.app.Notification
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
+import ru.apphelper.journal.EventJournal
 
 class AppNotificationListenerService : NotificationListenerService() {
 
@@ -22,15 +23,16 @@ class AppNotificationListenerService : NotificationListenerService() {
             packageManager.getApplicationLabel(info).toString()
         }.getOrDefault(status.packageName)
 
-        NotificationEventStore.add(
-            NotificationEvent(
-                id = status.key,
-                packageName = status.packageName,
-                appName = appName,
-                sender = title.ifBlank { appName },
-                text = body,
-                receivedAt = status.postTime,
-            ),
+        val event = NotificationEvent(
+            id = status.key,
+            packageName = status.packageName,
+            appName = appName,
+            sender = title.ifBlank { appName },
+            text = body,
+            receivedAt = status.postTime,
         )
+
+        EventJournal(this).appendNotification(event)
+        NotificationEventStore.add(event)
     }
 }
