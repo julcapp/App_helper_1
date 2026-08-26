@@ -29,6 +29,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import java.util.Locale
+import kotlin.math.roundToInt
 import ru.apphelper.calls.CallEvent
 import ru.apphelper.calls.CallEventStore
 import ru.apphelper.calls.PendingUnknownCaller
@@ -40,6 +42,11 @@ import ru.apphelper.dialog.VoiceCommandRouter
 import ru.apphelper.domain.UserProfile
 import ru.apphelper.journal.EventJournal
 import ru.apphelper.journal.JournalEventType
+import ru.apphelper.location.DeviceLocation
+import ru.apphelper.location.LocationAssistant
+import ru.apphelper.location.NavigationHelper
+import ru.apphelper.location.SafeLocation
+import ru.apphelper.location.SafePlaceStore
 import ru.apphelper.notifications.NotificationEvent
 import ru.apphelper.notifications.NotificationEventStore
 import ru.apphelper.ui.onboarding.AppHelperTheme
@@ -49,23 +56,25 @@ import ru.apphelper.voice.AndroidVoiceAssistant
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val store = UserProfileStore(this)
+        val profileStore = UserProfileStore(this)
         val journal = EventJournal(this)
         val unknownCallerStore = UnknownCallerStore(this)
+        val safePlaceStore = SafePlaceStore(this)
+        val locationAssistant = LocationAssistant(this)
 
         setContent {
             AppHelperTheme {
-                var profile by remember { mutableStateOf(store.load()) }
+                var profile by remember { mutableStateOf(profileStore.load()) }
                 var microphoneGranted by remember {
-                    mutableStateOf(
-                        ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) ==
-                            PackageManager.PERMISSION_GRANTED,
-                    )
+                    mutableStateOf(hasPermission(Manifest.permission.RECORD_AUDIO))
                 }
                 var contactsGranted by remember {
+                    mutableStateOf(hasPermission(Manifest.permission.READ_CONTACTS))
+                }
+                var locationGranted by remember {
                     mutableStateOf(
-                        ContextCompat.checkSelfPermission(this, Manifest.permission.READ_CONTACTS) ==
-                            PackageManager.PERMISSION_GRANTED,
+                        hasPermission(Manifest.permission.ACCESS_FINE_LOCATION) ||
+                            hasPermission(Manifest.permission.ACCESS_COARSE_LOCATION),
                     )
                 }
                 var voiceError by remember { mutableStateOf<String?>(null) }
@@ -76,6 +85,9 @@ class MainActivity : ComponentActivity() {
                 var pendingUnknownCaller by remember {
                     mutableStateOf<PendingUnknownCaller?>(unknownCallerStore.load())
                 }
+                var safeHome by remember { mutableStateOf<SafeLocation?>(safePlaceStore.loadHome()) }
+                var lastKnownLocation by remember { mutableStateOf<DeviceLocation?>(null) }
+
                 var awaitingNotificationCommand by remember { mutableStateOf(false) }
                 var awaitingUnknownCallerConfirmation by remember { mutableStateOf(false) }
                 var awaitingContactName by remember { mutableStateOf(false) }
@@ -150,38 +162,74 @@ class MainActivity : ComponentActivity() {
                         speak("Новых пропущенных событий нет.")
                         return
                     }
-
                     val notifications = events.count { it.type == JournalEventType.NOTIFICATION }
                     val calls = events.count { it.type == JournalEventType.CALL }
-                    val intro = buildString {
-                        append("Вы пропустили ")
-                        val parts = mutableListOf<String>()
-                        if (calls > 0) parts += "$calls звонков"
-                        if (notifications > 0) parts += "$notifications сообщений и уведомлений"
-                        append(parts.joinToString(" и "))
-                        append(". ")
-                    }
+                    val parts = mutableListOf<String>()
+                    if (calls > 0) parts += "$calls звонков"
+                    if (notifications > 0) parts += "$notifications сообщений и уведомлений"
                     val details = events.take(5).joinToString(". ") { event ->
                         when (event.type) {
                             JournalEventType.CALL -> "Звонок от ${event.title}"
-                            JournalEventType.NOTIFICATION -> {
-                                if (event.body.isBlank()) "Сообщение от ${event.title} в ${event.source}"
-                                else "${event.source}, ${event.title}: ${event.body}"
+                            JournalEventType.NOTIFICATION -> if (event.body.isBlank()) {
+                                "Сообщение от ${event.title} в ${event.source}"
+                            } else {
+                                "${event.source}, ${event.title}: ${event.body}"
                             }
                         }
                     }
-                    speak(intro + details)
+                    speak("Вы пропустили ${parts.joinToString(" и ")}. $details")
                     journal.markReviewed(events.map { it.id })
+                }
+
+                fun tellWhereAmI() {
+                    if (!locationGranted) {
+                        speak("Нужно разрешить доступ к местоположению.")
+                        return
+                    }
+                    locationAssistant.getCurrentLocation(
+                        onSuccess = { location ->
+                            lastKnownLocation = location
+                            val lat = String.format(Locale.US, "%.5f", location.latitude)
+                            val lon = String.format(Locale.US, "%.5f", location.longitude)
+                            val accuracy = location.accuracyMeters?.roundToInt()
+                            val accuracyText = accuracy?.let { " Точность около $it метров." }.orEmpty()
+                            speak("Ваши координаты: широта $lat, долгота $lon.$accuracyText")
+                        },
+                        onError = { speak(it) },
+                    )
+                }
+
+                fun saveCurrentAsHome() {
+                    if (!locationGranted) {
+                        speak("Нужно разрешить доступ к местоположению.")
+                        return
+                    }
+                    locationAssistant.getCurrentLocation(
+                        onSuccess = { location ->
+                            lastKnownLocation = location
+                            safePlaceStore.saveHome(location)
+                            safeHome = safePlaceStore.loadHome()
+                            speak("Текущее место сохранено как дом.")
+                        },
+                        onError = { speak(it) },
+                    )
+                }
+
+                fun navigateHome() {
+                    val home = safeHome
+                    if (home == null) {
+                        speak("Дом ещё не сохранён. Скажите: запомни это место как дом.")
+                        return
+                    }
+                    val opened = NavigationHelper.openRoute(this, home)
+                    if (opened) speak("Открываю маршрут домой.")
+                    else speak("На телефоне не найдено приложение, которое может открыть маршрут.")
                 }
 
                 fun handleRecognized(recognized: String) {
                     if (awaitingContactName) {
                         val name = recognized.trim()
-                        if (name.isBlank()) {
-                            askContactName()
-                        } else {
-                            openContactForm(name)
-                        }
+                        if (name.isBlank()) askContactName() else openContactForm(name)
                         return
                     }
 
@@ -208,13 +256,6 @@ class MainActivity : ComponentActivity() {
                         return
                     }
 
-                    if (command == VoiceCommand.MISSED) {
-                        awaitingNotificationCommand = false
-                        listeningForGeneralCommand = false
-                        speakMissedEvents()
-                        return
-                    }
-
                     if (awaitingNotificationCommand) {
                         when (command) {
                             VoiceCommand.READ -> readLatestNotification()
@@ -224,10 +265,9 @@ class MainActivity : ComponentActivity() {
                                 speak("Хорошо. Оставлю на потом.")
                             }
                             VoiceCommand.REPEAT -> lastPrompt?.let(::speakAndListenNotification)
-                            VoiceCommand.MISSED -> Unit
-                            VoiceCommand.UNKNOWN -> {
-                                speakAndListenNotification("Не понял ответ. Скажите: прочитай, позже или повтори.")
-                            }
+                            else -> speakAndListenNotification(
+                                "Не понял ответ. Скажите: прочитай, позже или повтори.",
+                            )
                         }
                         return
                     }
@@ -236,8 +276,13 @@ class MainActivity : ComponentActivity() {
                         listeningForGeneralCommand = false
                         when (command) {
                             VoiceCommand.MISSED -> speakMissedEvents()
+                            VoiceCommand.WHERE_AM_I -> tellWhereAmI()
+                            VoiceCommand.GO_HOME -> navigateHome()
+                            VoiceCommand.SAVE_HOME -> saveCurrentAsHome()
                             VoiceCommand.REPEAT -> lastPrompt?.let(::speak)
-                            else -> speak("Пока я понимаю команду: что я пропустил.")
+                            else -> speak(
+                                "Пока я понимаю команды: что я пропустил, где я, запомни дом и отведи меня домой.",
+                            )
                         }
                     }
                 }
@@ -295,6 +340,13 @@ class MainActivity : ComponentActivity() {
                     ActivityResultContracts.RequestPermission(),
                 ) { granted -> contactsGranted = granted }
 
+                val locationLauncher = rememberLauncherForActivityResult(
+                    ActivityResultContracts.RequestMultiplePermissions(),
+                ) { result ->
+                    locationGranted = result[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
+                        result[Manifest.permission.ACCESS_COARSE_LOCATION] == true
+                }
+
                 val roleLauncher = rememberLauncherForActivityResult(
                     ActivityResultContracts.StartActivityForResult(),
                 ) { }
@@ -318,7 +370,7 @@ class MainActivity : ComponentActivity() {
                                     ),
                                     onboardingCompleted = true,
                                 )
-                                store.save(completedProfile)
+                                profileStore.save(completedProfile)
                                 profile = completedProfile
                             },
                         )
@@ -328,13 +380,24 @@ class MainActivity : ComponentActivity() {
                             latestEvent = latestEvent,
                             latestCall = latestCall,
                             pendingUnknownCaller = pendingUnknownCaller,
+                            safeHome = safeHome,
+                            lastKnownLocation = lastKnownLocation,
                             contactsGranted = contactsGranted,
+                            locationGranted = locationGranted,
                             voiceError = voiceError,
                             onEnableNotificationAccess = {
                                 startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
                             },
                             onRequestContacts = {
                                 contactsLauncher.launch(Manifest.permission.READ_CONTACTS)
+                            },
+                            onRequestLocation = {
+                                locationLauncher.launch(
+                                    arrayOf(
+                                        Manifest.permission.ACCESS_FINE_LOCATION,
+                                        Manifest.permission.ACCESS_COARSE_LOCATION,
+                                    ),
+                                )
                             },
                             onRequestCallScreeningRole = {
                                 val roleManager = getSystemService(RoleManager::class.java)
@@ -352,6 +415,9 @@ class MainActivity : ComponentActivity() {
                                 latestEvent = null
                             },
                             onMissed = { speakMissedEvents() },
+                            onWhereAmI = { tellWhereAmI() },
+                            onSaveHome = { saveCurrentAsHome() },
+                            onNavigateHome = { navigateHome() },
                             onSaveUnknown = {
                                 if (microphoneGranted) askAboutUnknownCaller()
                                 else microphoneLauncher.launch(Manifest.permission.RECORD_AUDIO)
@@ -365,9 +431,7 @@ class MainActivity : ComponentActivity() {
                                     listeningForGeneralCommand = true
                                     lastPrompt = "Слушаю."
                                     voice.setSpeechRate(if (profile.speech.slowerSpeech) 0.78f else 1.0f)
-                                    voice.speak("Слушаю.") {
-                                        voice.startListening()
-                                    }
+                                    voice.speak("Слушаю.") { voice.startListening() }
                                 }
                             },
                             onSpeak = {
@@ -384,6 +448,9 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+
+    private fun hasPermission(permission: String): Boolean =
+        ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED
 }
 
 @androidx.compose.runtime.Composable
@@ -392,14 +459,21 @@ private fun HomeScreen(
     latestEvent: NotificationEvent?,
     latestCall: CallEvent?,
     pendingUnknownCaller: PendingUnknownCaller?,
+    safeHome: SafeLocation?,
+    lastKnownLocation: DeviceLocation?,
     contactsGranted: Boolean,
+    locationGranted: Boolean,
     voiceError: String?,
     onEnableNotificationAccess: () -> Unit,
     onRequestContacts: () -> Unit,
+    onRequestLocation: () -> Unit,
     onRequestCallScreeningRole: () -> Unit,
     onReadNotification: () -> Unit,
     onLater: () -> Unit,
     onMissed: () -> Unit,
+    onWhereAmI: () -> Unit,
+    onSaveHome: () -> Unit,
+    onNavigateHome: () -> Unit,
     onSaveUnknown: () -> Unit,
     onListen: () -> Unit,
     onSpeak: () -> Unit,
@@ -414,9 +488,33 @@ private fun HomeScreen(
         Button(onClick = onListen, modifier = Modifier.fillMaxWidth().height(72.dp)) {
             Text("Слушаю", fontSize = 22.sp)
         }
-
         Button(onClick = onMissed, modifier = Modifier.fillMaxWidth().height(64.dp)) {
             Text("Что я пропустил?", fontSize = 20.sp)
+        }
+
+        if (!locationGranted) {
+            Button(onClick = onRequestLocation, modifier = Modifier.fillMaxWidth().height(64.dp)) {
+                Text("Разрешить геолокацию", fontSize = 18.sp)
+            }
+        } else {
+            Button(onClick = onWhereAmI, modifier = Modifier.fillMaxWidth().height(64.dp)) {
+                Text("Где я?", fontSize = 20.sp)
+            }
+            Button(onClick = onSaveHome, modifier = Modifier.fillMaxWidth().height(64.dp)) {
+                Text(if (safeHome == null) "Запомнить это место как дом" else "Обновить точку Дом", fontSize = 18.sp)
+            }
+        }
+        if (safeHome != null) {
+            Button(onClick = onNavigateHome, modifier = Modifier.fillMaxWidth().height(64.dp)) {
+                Text("Отведи меня домой", fontSize = 20.sp)
+            }
+        }
+        lastKnownLocation?.let { location ->
+            Text(
+                "Последняя позиция: ${String.format(Locale.US, "%.5f", location.latitude)}, " +
+                    String.format(Locale.US, "%.5f", location.longitude),
+                fontSize = 16.sp,
+            )
         }
 
         pendingUnknownCaller?.let { caller ->
@@ -427,28 +525,22 @@ private fun HomeScreen(
             }
         }
 
-        Button(
-            onClick = onEnableNotificationAccess,
-            modifier = Modifier.fillMaxWidth().height(64.dp),
-        ) { Text("Разрешить доступ к уведомлениям", fontSize = 18.sp) }
-
-        if (!contactsGranted) {
-            Button(
-                onClick = onRequestContacts,
-                modifier = Modifier.fillMaxWidth().height(64.dp),
-            ) { Text("Разрешить доступ к контактам", fontSize = 18.sp) }
+        Button(onClick = onEnableNotificationAccess, modifier = Modifier.fillMaxWidth().height(64.dp)) {
+            Text("Разрешить доступ к уведомлениям", fontSize = 18.sp)
         }
-
-        Button(
-            onClick = onRequestCallScreeningRole,
-            modifier = Modifier.fillMaxWidth().height(64.dp),
-        ) { Text("Включить определитель звонков", fontSize = 18.sp) }
+        if (!contactsGranted) {
+            Button(onClick = onRequestContacts, modifier = Modifier.fillMaxWidth().height(64.dp)) {
+                Text("Разрешить доступ к контактам", fontSize = 18.sp)
+            }
+        }
+        Button(onClick = onRequestCallScreeningRole, modifier = Modifier.fillMaxWidth().height(64.dp)) {
+            Text("Включить определитель звонков", fontSize = 18.sp)
+        }
 
         latestCall?.let { call ->
             Text("Последний звонок", fontSize = 24.sp)
             Text(call.displayName ?: call.phoneNumber.ifBlank { "Неизвестный номер" }, fontSize = 20.sp)
         }
-
         latestEvent?.let { event ->
             Text("Новое уведомление", fontSize = 24.sp)
             Text("${event.appName}: ${event.sender}", fontSize = 20.sp)
