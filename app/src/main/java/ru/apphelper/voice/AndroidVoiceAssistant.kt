@@ -7,7 +7,9 @@ import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
+import android.speech.tts.UtteranceProgressListener
 import java.util.Locale
+import java.util.UUID
 
 class AndroidVoiceAssistant(
     private val context: Context,
@@ -15,6 +17,7 @@ class AndroidVoiceAssistant(
     private val onError: (String) -> Unit,
 ) : VoiceAssistant, TextToSpeech.OnInitListener {
 
+    private val completionCallbacks = mutableMapOf<String, () -> Unit>()
     private val tts = TextToSpeech(context, this)
     private val recognizer: SpeechRecognizer? =
         if (SpeechRecognizer.isRecognitionAvailable(context)) {
@@ -24,6 +27,17 @@ class AndroidVoiceAssistant(
         }
 
     init {
+        tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+            override fun onStart(utteranceId: String?) = Unit
+            override fun onError(utteranceId: String?) {
+                utteranceId?.let { completionCallbacks.remove(it) }
+            }
+            override fun onDone(utteranceId: String?) {
+                val callback = utteranceId?.let { completionCallbacks.remove(it) } ?: return
+                callback()
+            }
+        })
+
         recognizer?.setRecognitionListener(object : RecognitionListener {
             override fun onReadyForSpeech(params: Bundle?) = Unit
             override fun onBeginningOfSpeech() = Unit
@@ -54,8 +68,10 @@ class AndroidVoiceAssistant(
         }
     }
 
-    override fun speak(text: String) {
-        tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "app-helper")
+    override fun speak(text: String, onDone: (() -> Unit)?) {
+        val utteranceId = "app-helper-${UUID.randomUUID()}"
+        if (onDone != null) completionCallbacks[utteranceId] = onDone
+        tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
     }
 
     override fun setSpeechRate(rate: Float) {
@@ -85,6 +101,7 @@ class AndroidVoiceAssistant(
     }
 
     override fun release() {
+        completionCallbacks.clear()
         recognizer?.destroy()
         tts.stop()
         tts.shutdown()
