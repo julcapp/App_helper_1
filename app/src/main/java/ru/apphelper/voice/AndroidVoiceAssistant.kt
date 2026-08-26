@@ -58,6 +58,10 @@ class AndroidVoiceAssistant(
         tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "app-helper")
     }
 
+    override fun setSpeechRate(rate: Float) {
+        tts.setSpeechRate(rate.coerceIn(0.5f, 1.5f))
+    }
+
     override fun startListening() {
         val speechRecognizer = recognizer ?: run {
             onError("Распознавание речи недоступно на этом устройстве")
