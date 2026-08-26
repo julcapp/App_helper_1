@@ -3,6 +3,8 @@ package ru.apphelper.voice
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
@@ -17,6 +19,7 @@ class AndroidVoiceAssistant(
     private val onError: (String) -> Unit,
 ) : VoiceAssistant, TextToSpeech.OnInitListener {
 
+    private val mainHandler = Handler(Looper.getMainLooper())
     private val completionCallbacks = mutableMapOf<String, () -> Unit>()
     private val tts = TextToSpeech(context, this)
     private val recognizer: SpeechRecognizer? =
@@ -29,12 +32,14 @@ class AndroidVoiceAssistant(
     init {
         tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
             override fun onStart(utteranceId: String?) = Unit
+
             override fun onError(utteranceId: String?) {
                 utteranceId?.let { completionCallbacks.remove(it) }
             }
+
             override fun onDone(utteranceId: String?) {
                 val callback = utteranceId?.let { completionCallbacks.remove(it) } ?: return
-                callback()
+                mainHandler.post(callback)
             }
         })
 
