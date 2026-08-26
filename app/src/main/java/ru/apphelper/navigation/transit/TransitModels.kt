@@ -28,6 +28,9 @@ data class TransitLeg(
     val mode: TransitMode,
     val from: TransitStop? = null,
     val to: TransitStop? = null,
+    /** Номер маршрута, например 24, 7, М3. Только из данных транспортного провайдера. */
+    val routeNumber: String? = null,
+    /** Название линии/маршрута, если провайдер его передаёт отдельно от номера. */
     val routeName: String? = null,
     val headsign: String? = null,
     val departureTimeText: String? = null,
