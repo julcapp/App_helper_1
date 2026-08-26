@@ -4,6 +4,7 @@ import android.Manifest
 import android.app.role.RoleManager
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import androidx.activity.ComponentActivity
@@ -16,6 +17,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -49,6 +52,7 @@ import ru.apphelper.location.SafeLocation
 import ru.apphelper.location.SafePlaceStore
 import ru.apphelper.notifications.NotificationEvent
 import ru.apphelper.notifications.NotificationEventStore
+import ru.apphelper.profile.ProfileTuningSession
 import ru.apphelper.ui.onboarding.AppHelperTheme
 import ru.apphelper.ui.onboarding.OnboardingFlow
 import ru.apphelper.voice.AndroidVoiceAssistant
@@ -56,6 +60,7 @@ import ru.apphelper.voice.AndroidVoiceAssistant
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
         val profileStore = UserProfileStore(this)
         val journal = EventJournal(this)
         val unknownCallerStore = UnknownCallerStore(this)
@@ -92,6 +97,7 @@ class MainActivity : ComponentActivity() {
                 var awaitingUnknownCallerConfirmation by remember { mutableStateOf(false) }
                 var awaitingContactName by remember { mutableStateOf(false) }
                 var listeningForGeneralCommand by remember { mutableStateOf(false) }
+                var tuningSession by remember { mutableStateOf<ProfileTuningSession?>(null) }
                 var lastPrompt by remember { mutableStateOf<String?>(null) }
 
                 lateinit var voice: AndroidVoiceAssistant
@@ -101,35 +107,59 @@ class MainActivity : ComponentActivity() {
                     voice.speak(text)
                 }
 
-                fun speakAndListenNotification(prompt: String) {
+                fun speakAndListen(prompt: String) {
                     lastPrompt = prompt
-                    awaitingNotificationCommand = true
                     voice.setSpeechRate(if (profile.speech.slowerSpeech) 0.78f else 1.0f)
                     voice.speak(prompt) {
                         if (microphoneGranted) voice.startListening()
                     }
+                }
+
+                fun speakAndListenNotification(prompt: String) {
+                    awaitingNotificationCommand = true
+                    speakAndListen(prompt)
+                }
+
+                fun askTuningQuestion(session: ProfileTuningSession) {
+                    val prompt = session.currentPrompt()
+                    if (prompt == null) return
+                    speakAndListen(prompt)
+                }
+
+                fun startProfileTuning() {
+                    if (!microphoneGranted) {
+                        speak("Для голосовой настройки нужен доступ к микрофону.")
+                        return
+                    }
+                    awaitingNotificationCommand = false
+                    awaitingUnknownCallerConfirmation = false
+                    awaitingContactName = false
+                    listeningForGeneralCommand = false
+                    val session = ProfileTuningSession(priorities = profile.priorities)
+                    tuningSession = session
+                    speakAndListen(
+                        "Хорошо. Настроюсь под вас. Отвечайте да или нет. ${session.currentPrompt()}",
+                    )
+                }
+
+                fun finishProfileTuning(session: ProfileTuningSession) {
+                    val updatedProfile = profile.copy(priorities = session.priorities)
+                    profileStore.save(updatedProfile)
+                    profile = updatedProfile
+                    tuningSession = null
+                    speak("Готово. Я сохранил ваши приоритеты. Вы сможете снова сказать: настройся под меня.")
                 }
 
                 fun askAboutUnknownCaller() {
                     val caller = pendingUnknownCaller ?: return
                     awaitingUnknownCallerConfirmation = true
                     listeningForGeneralCommand = false
-                    val prompt = "Последний неизвестный номер ${caller.phoneNumber}. Сохранить в контакты?"
-                    lastPrompt = prompt
-                    voice.setSpeechRate(if (profile.speech.slowerSpeech) 0.78f else 1.0f)
-                    voice.speak(prompt) {
-                        if (microphoneGranted) voice.startListening()
-                    }
+                    speakAndListen("Последний неизвестный номер ${caller.phoneNumber}. Сохранить в контакты?")
                 }
 
                 fun askContactName() {
                     awaitingContactName = true
-                    val prompt = "Как назвать этот контакт? Назовите имя."
-                    lastPrompt = prompt
-                    voice.setSpeechRate(if (profile.speech.slowerSpeech) 0.78f else 1.0f)
-                    voice.speak(prompt) {
-                        if (microphoneGranted) voice.startListening()
-                    }
+                    speakAndListen("Как назвать этот контакт? Назовите имя.")
                 }
 
                 fun openContactForm(displayName: String) {
@@ -235,6 +265,24 @@ class MainActivity : ComponentActivity() {
 
                     val command = VoiceCommandRouter.parse(recognized)
 
+                    tuningSession?.let { current ->
+                        when (command) {
+                            VoiceCommand.READ,
+                            VoiceCommand.LATER -> {
+                                val next = current.answer(command == VoiceCommand.READ)
+                                if (next.isComplete) {
+                                    finishProfileTuning(next)
+                                } else {
+                                    tuningSession = next
+                                    askTuningQuestion(next)
+                                }
+                            }
+                            VoiceCommand.REPEAT -> askTuningQuestion(current)
+                            else -> speakAndListen("Не понял. Ответьте да, нет или скажите повтори. ${current.currentPrompt()}")
+                        }
+                        return
+                    }
+
                     if (awaitingUnknownCallerConfirmation) {
                         when (command) {
                             VoiceCommand.READ -> {
@@ -246,12 +294,7 @@ class MainActivity : ComponentActivity() {
                                 speak("Хорошо. Номер останется в списке, можно сохранить его позже.")
                             }
                             VoiceCommand.REPEAT -> askAboutUnknownCaller()
-                            else -> {
-                                awaitingUnknownCallerConfirmation = true
-                                voice.speak("Не понял. Скажите да, нет или повтори.") {
-                                    if (microphoneGranted) voice.startListening()
-                                }
-                            }
+                            else -> speakAndListen("Не понял. Скажите да, нет или повтори.")
                         }
                         return
                     }
@@ -265,9 +308,7 @@ class MainActivity : ComponentActivity() {
                                 speak("Хорошо. Оставлю на потом.")
                             }
                             VoiceCommand.REPEAT -> lastPrompt?.let(::speakAndListenNotification)
-                            else -> speakAndListenNotification(
-                                "Не понял ответ. Скажите: прочитай, позже или повтори.",
-                            )
+                            else -> speakAndListenNotification("Не понял ответ. Скажите: прочитай, позже или повтори.")
                         }
                         return
                     }
@@ -279,9 +320,10 @@ class MainActivity : ComponentActivity() {
                             VoiceCommand.WHERE_AM_I -> tellWhereAmI()
                             VoiceCommand.GO_HOME -> navigateHome()
                             VoiceCommand.SAVE_HOME -> saveCurrentAsHome()
+                            VoiceCommand.TUNE_TO_ME -> startProfileTuning()
                             VoiceCommand.REPEAT -> lastPrompt?.let(::speak)
                             else -> speak(
-                                "Пока я понимаю команды: что я пропустил, где я, запомни дом и отведи меня домой.",
+                                "Я понимаю команды: что я пропустил, где я, запомни дом, отведи меня домой и настройся под меня.",
                             )
                         }
                     }
@@ -385,6 +427,7 @@ class MainActivity : ComponentActivity() {
                             contactsGranted = contactsGranted,
                             locationGranted = locationGranted,
                             voiceError = voiceError,
+                            tuningActive = tuningSession != null,
                             onEnableNotificationAccess = {
                                 startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
                             },
@@ -400,13 +443,17 @@ class MainActivity : ComponentActivity() {
                                 )
                             },
                             onRequestCallScreeningRole = {
-                                val roleManager = getSystemService(RoleManager::class.java)
-                                if (roleManager?.isRoleAvailable(RoleManager.ROLE_CALL_SCREENING) == true &&
-                                    !roleManager.isRoleHeld(RoleManager.ROLE_CALL_SCREENING)
-                                ) {
-                                    roleLauncher.launch(
-                                        roleManager.createRequestRoleIntent(RoleManager.ROLE_CALL_SCREENING),
-                                    )
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                                    val roleManager = getSystemService(RoleManager::class.java)
+                                    if (roleManager?.isRoleAvailable(RoleManager.ROLE_CALL_SCREENING) == true &&
+                                        !roleManager.isRoleHeld(RoleManager.ROLE_CALL_SCREENING)
+                                    ) {
+                                        roleLauncher.launch(
+                                            roleManager.createRequestRoleIntent(RoleManager.ROLE_CALL_SCREENING),
+                                        )
+                                    }
+                                } else {
+                                    speak("Определитель звонков требует Android 10 или новее.")
                                 }
                             },
                             onReadNotification = { readLatestNotification() },
@@ -418,6 +465,13 @@ class MainActivity : ComponentActivity() {
                             onWhereAmI = { tellWhereAmI() },
                             onSaveHome = { saveCurrentAsHome() },
                             onNavigateHome = { navigateHome() },
+                            onTuneToMe = {
+                                if (!microphoneGranted) {
+                                    microphoneLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                } else {
+                                    startProfileTuning()
+                                }
+                            },
                             onSaveUnknown = {
                                 if (microphoneGranted) askAboutUnknownCaller()
                                 else microphoneLauncher.launch(Manifest.permission.RECORD_AUDIO)
@@ -464,6 +518,7 @@ private fun HomeScreen(
     contactsGranted: Boolean,
     locationGranted: Boolean,
     voiceError: String?,
+    tuningActive: Boolean,
     onEnableNotificationAccess: () -> Unit,
     onRequestContacts: () -> Unit,
     onRequestLocation: () -> Unit,
@@ -474,12 +529,16 @@ private fun HomeScreen(
     onWhereAmI: () -> Unit,
     onSaveHome: () -> Unit,
     onNavigateHome: () -> Unit,
+    onTuneToMe: () -> Unit,
     onSaveUnknown: () -> Unit,
     onListen: () -> Unit,
     onSpeak: () -> Unit,
 ) {
     Column(
-        modifier = Modifier.fillMaxSize().padding(24.dp),
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(24.dp),
         verticalArrangement = Arrangement.spacedBy(18.dp),
     ) {
         Text("Помощник готов", fontSize = 30.sp)
@@ -487,6 +546,9 @@ private fun HomeScreen(
 
         Button(onClick = onListen, modifier = Modifier.fillMaxWidth().height(72.dp)) {
             Text("Слушаю", fontSize = 22.sp)
+        }
+        Button(onClick = onTuneToMe, modifier = Modifier.fillMaxWidth().height(64.dp)) {
+            Text(if (tuningActive) "Настройка идёт…" else "Настройся под меня", fontSize = 20.sp)
         }
         Button(onClick = onMissed, modifier = Modifier.fillMaxWidth().height(64.dp)) {
             Text("Что я пропустил?", fontSize = 20.sp)
