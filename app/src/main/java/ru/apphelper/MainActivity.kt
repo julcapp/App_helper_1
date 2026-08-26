@@ -29,6 +29,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import ru.apphelper.data.UserProfileStore
+import ru.apphelper.dialog.VoiceCommand
+import ru.apphelper.dialog.VoiceCommandRouter
 import ru.apphelper.domain.UserProfile
 import ru.apphelper.notifications.NotificationEvent
 import ru.apphelper.notifications.NotificationEventStore
@@ -53,13 +55,62 @@ class MainActivity : ComponentActivity() {
                     )
                 }
                 var voiceError by remember { mutableStateOf<String?>(null) }
-                var latestEvent by remember { mutableStateOf<NotificationEvent?>(NotificationEventStore.snapshot().firstOrNull()) }
+                var latestEvent by remember {
+                    mutableStateOf<NotificationEvent?>(NotificationEventStore.snapshot().firstOrNull())
+                }
+                var awaitingNotificationCommand by remember { mutableStateOf(false) }
+                var lastPrompt by remember { mutableStateOf<String?>(null) }
 
-                val voice = remember {
+                lateinit var voice: AndroidVoiceAssistant
+
+                fun speakAndListen(prompt: String) {
+                    lastPrompt = prompt
+                    awaitingNotificationCommand = true
+                    voice.setSpeechRate(if (profile.speech.slowerSpeech) 0.78f else 1.0f)
+                    voice.speak(prompt) {
+                        if (microphoneGranted) voice.startListening()
+                    }
+                }
+
+                fun readLatestNotification() {
+                    latestEvent?.let { event ->
+                        awaitingNotificationCommand = false
+                        val spoken = if (event.text.isBlank()) {
+                            "В уведомлении нет доступного текста."
+                        } else {
+                            val sender = event.sender.ifBlank { event.appName }
+                            "$sender. ${event.text}"
+                        }
+                        voice.speak(spoken)
+                        latestEvent = null
+                    }
+                }
+
+                voice = remember {
                     AndroidVoiceAssistant(
                         context = this,
-                        onRecognized = { },
-                        onError = { voiceError = it },
+                        onRecognized = { recognized ->
+                            if (!awaitingNotificationCommand) return@AndroidVoiceAssistant
+
+                            when (VoiceCommandRouter.parse(recognized)) {
+                                VoiceCommand.READ -> readLatestNotification()
+                                VoiceCommand.LATER -> {
+                                    awaitingNotificationCommand = false
+                                    latestEvent = null
+                                    voice.speak("Хорошо. Оставлю на потом.")
+                                }
+                                VoiceCommand.REPEAT -> {
+                                    lastPrompt?.let(::speakAndListen)
+                                }
+                                VoiceCommand.UNKNOWN -> {
+                                    speakAndListen("Не понял ответ. Скажите: прочитай, позже или повтори.")
+                                }
+                            }
+                        },
+                        onError = { error ->
+                            voiceError = error
+                            awaitingNotificationCommand = false
+                        },
                     )
                 }
 
@@ -67,8 +118,12 @@ class MainActivity : ComponentActivity() {
                     val listener: (NotificationEvent) -> Unit = { event ->
                         latestEvent = event
                         val sender = event.sender.ifBlank { event.appName }
-                        voice.setSpeechRate(if (profile.speech.slowerSpeech) 0.78f else 1.0f)
-                        voice.speak("Новое сообщение в ${event.appName} от $sender. Прочитать?")
+                        val prompt = "Новое сообщение в ${event.appName} от $sender. Прочитать?"
+                        if (microphoneGranted) {
+                            speakAndListen(prompt)
+                        } else {
+                            voice.speak(prompt)
+                        }
                     }
                     NotificationEventStore.addListener(listener)
                     onDispose {
@@ -112,17 +167,11 @@ class MainActivity : ComponentActivity() {
                             onEnableNotificationAccess = {
                                 startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
                             },
-                            onReadNotification = {
-                                latestEvent?.let { event ->
-                                    val spoken = if (event.text.isBlank()) {
-                                        "В уведомлении нет доступного текста."
-                                    } else {
-                                        "${event.sender}. ${event.text}"
-                                    }
-                                    voice.speak(spoken)
-                                }
+                            onReadNotification = { readLatestNotification() },
+                            onLater = {
+                                awaitingNotificationCommand = false
+                                latestEvent = null
                             },
-                            onLater = { latestEvent = null },
                             onSpeak = {
                                 voice.setSpeechRate(if (profile.speech.slowerSpeech) 0.78f else 1.0f)
                                 val greeting = if (profile.displayName.isBlank()) {
