@@ -275,8 +275,10 @@ class MainActivity : ComponentActivity() {
                                 if (microphoneGranted) {
                                     listeningForGeneralCommand = true
                                     lastPrompt = "Слушаю."
-                                    speak("Слушаю.")
-                                    voice.startListening()
+                                    voice.setSpeechRate(if (profile.speech.slowerSpeech) 0.78f else 1.0f)
+                                    voice.speak("Слушаю.") {
+                                        voice.startListening()
+                                    }
                                 } else {
                                     microphoneLauncher.launch(Manifest.permission.RECORD_AUDIO)
                                 }
