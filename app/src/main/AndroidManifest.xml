@@ -43,5 +43,15 @@
                 android:name="android.service.notification.disabled_filter_types"
                 android:value="ongoing|silent" />
         </service>
+
+        <service
+            android:name=".calls.AppCallScreeningService"
+            android:exported="true"
+            android:label="Голосовой помощник — определитель звонков"
+            android:permission="android.permission.BIND_SCREENING_SERVICE">
+            <intent-filter>
+                <action android:name="android.telecom.CallScreeningService" />
+            </intent-filter>
+        </service>
     </application>
 </manifest>
