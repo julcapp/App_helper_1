@@ -10,4 +10,4 @@ interface TransitRouteProvider {
 }
 
 class TransitProviderNotConfiguredException(provider: String) :
-    IllegalStateException("Транспортный провайдер $provider не настроен: требуется API-ключ и реальная сетевой адаптер")
+    IllegalStateException("Транспортный провайдер $provider не настроен: требуется API-ключ и реальный сетевой адаптер")
