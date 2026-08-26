@@ -7,6 +7,8 @@ import ru.apphelper.domain.SpeechPreferences
 import ru.apphelper.domain.TrustedContact
 import ru.apphelper.domain.UserPermissions
 import ru.apphelper.domain.UserProfile
+import ru.apphelper.profile.ProfilePriorities
+import ru.apphelper.profile.ProfilePriority
 
 class UserProfileStore(context: Context) {
     private val prefs = context.getSharedPreferences("app_helper_profile", Context.MODE_PRIVATE)
@@ -21,6 +23,15 @@ class UserProfileStore(context: Context) {
         val interests = prefs.getStringSet("interests", emptySet()).orEmpty()
         val trustedName = prefs.getString("trusted_name", "").orEmpty()
         val trustedPhone = prefs.getString("trusted_phone", "").orEmpty()
+        val defaultPriorities = ProfilePriorities()
+        val priorities = ProfilePriorities(
+            weights = ProfilePriority.entries.associateWith { priority ->
+                prefs.getInt(
+                    "priority_${priority.name.lowercase()}",
+                    defaultPriorities.weight(priority),
+                ).coerceIn(0, 100)
+            },
+        )
 
         return UserProfile(
             displayName = prefs.getString("display_name", "").orEmpty(),
@@ -41,6 +52,7 @@ class UserProfileStore(context: Context) {
                 suggestRestEnabled = prefs.getBoolean("care_suggest_rest", true),
                 cooldownMinutes = prefs.getInt("care_cooldown_minutes", 180).coerceAtLeast(30),
             ),
+            priorities = priorities,
             interests = interests,
             trustedContact = if (trustedName.isNotBlank() || trustedPhone.isNotBlank()) {
                 TrustedContact(trustedName, trustedPhone)
@@ -53,7 +65,7 @@ class UserProfileStore(context: Context) {
     }
 
     fun save(profile: UserProfile) {
-        prefs.edit()
+        val editor = prefs.edit()
             .putString("display_name", profile.displayName)
             .putStringSet("modes", profile.assistanceModes.map { it.name }.toSet())
             .putBoolean("slower_speech", profile.speech.slowerSpeech)
@@ -73,6 +85,13 @@ class UserProfileStore(context: Context) {
             .putString("primary_language", profile.primaryLanguage)
             .putStringSet("travel_languages", profile.travelLanguages)
             .putBoolean("onboarding_completed", profile.onboardingCompleted)
-            .apply()
+
+        ProfilePriority.entries.forEach { priority ->
+            editor.putInt(
+                "priority_${priority.name.lowercase()}",
+                profile.priorities.weight(priority),
+            )
+        }
+        editor.apply()
     }
 }
