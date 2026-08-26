@@ -6,6 +6,7 @@ import android.telecom.Call
 import android.telecom.CallScreeningService
 import androidx.core.content.ContextCompat
 import ru.apphelper.contacts.ContactLookup
+import ru.apphelper.journal.EventJournal
 
 class AppCallScreeningService : CallScreeningService() {
     override fun onScreenCall(callDetails: Call.Details) {
@@ -21,13 +22,14 @@ class AppCallScreeningService : CallScreeningService() {
             null
         }
 
-        CallEventStore.publish(
-            CallEvent(
-                phoneNumber = number,
-                displayName = displayName,
-                incoming = isIncoming,
-            ),
+        val event = CallEvent(
+            phoneNumber = number,
+            displayName = displayName,
+            incoming = isIncoming,
         )
+
+        EventJournal(this).appendCall(event)
+        CallEventStore.publish(event)
 
         if (isIncoming) {
             respondToCall(
