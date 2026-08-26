@@ -14,11 +14,22 @@ data class SpeechPreferences(
 )
 
 data class UserPermissions(
+    val microphoneGranted: Boolean = false,
     val readNotifications: Boolean = false,
     val callContactsWithConfirmation: Boolean = true,
     val sendMessagesWithConfirmation: Boolean = true,
     val shareLocationWithTrustedContactsOnly: Boolean = true,
     val automaticRepliesEnabled: Boolean = false,
+)
+
+data class TrustedContact(
+    val name: String = "",
+    val phone: String = "",
+)
+
+data class SafePlace(
+    val title: String = "",
+    val address: String = "",
 )
 
 data class UserProfile(
@@ -27,5 +38,9 @@ data class UserProfile(
     val speech: SpeechPreferences = SpeechPreferences(),
     val permissions: UserPermissions = UserPermissions(),
     val interests: Set<String> = emptySet(),
+    val trustedContact: TrustedContact? = null,
+    val safePlaces: List<SafePlace> = emptyList(),
+    val primaryLanguage: String = "ru",
+    val travelLanguages: Set<String> = setOf("es"),
     val onboardingCompleted: Boolean = false,
 )
