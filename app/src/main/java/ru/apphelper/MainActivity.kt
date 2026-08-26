@@ -31,6 +31,9 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import ru.apphelper.calls.CallEvent
 import ru.apphelper.calls.CallEventStore
+import ru.apphelper.calls.PendingUnknownCaller
+import ru.apphelper.calls.UnknownCallerStore
+import ru.apphelper.contacts.ContactInsertHelper
 import ru.apphelper.data.UserProfileStore
 import ru.apphelper.dialog.VoiceCommand
 import ru.apphelper.dialog.VoiceCommandRouter
@@ -48,6 +51,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         val store = UserProfileStore(this)
         val journal = EventJournal(this)
+        val unknownCallerStore = UnknownCallerStore(this)
 
         setContent {
             AppHelperTheme {
@@ -69,7 +73,12 @@ class MainActivity : ComponentActivity() {
                     mutableStateOf<NotificationEvent?>(NotificationEventStore.snapshot().firstOrNull())
                 }
                 var latestCall by remember { mutableStateOf<CallEvent?>(null) }
+                var pendingUnknownCaller by remember {
+                    mutableStateOf<PendingUnknownCaller?>(unknownCallerStore.load())
+                }
                 var awaitingNotificationCommand by remember { mutableStateOf(false) }
+                var awaitingUnknownCallerConfirmation by remember { mutableStateOf(false) }
+                var awaitingContactName by remember { mutableStateOf(false) }
                 var listeningForGeneralCommand by remember { mutableStateOf(false) }
                 var lastPrompt by remember { mutableStateOf<String?>(null) }
 
@@ -80,13 +89,45 @@ class MainActivity : ComponentActivity() {
                     voice.speak(text)
                 }
 
-                fun speakAndListen(prompt: String) {
+                fun speakAndListenNotification(prompt: String) {
                     lastPrompt = prompt
                     awaitingNotificationCommand = true
                     voice.setSpeechRate(if (profile.speech.slowerSpeech) 0.78f else 1.0f)
                     voice.speak(prompt) {
                         if (microphoneGranted) voice.startListening()
                     }
+                }
+
+                fun askAboutUnknownCaller() {
+                    val caller = pendingUnknownCaller ?: return
+                    awaitingUnknownCallerConfirmation = true
+                    listeningForGeneralCommand = false
+                    val prompt = "Последний неизвестный номер ${caller.phoneNumber}. Сохранить в контакты?"
+                    lastPrompt = prompt
+                    voice.setSpeechRate(if (profile.speech.slowerSpeech) 0.78f else 1.0f)
+                    voice.speak(prompt) {
+                        if (microphoneGranted) voice.startListening()
+                    }
+                }
+
+                fun askContactName() {
+                    awaitingContactName = true
+                    val prompt = "Как назвать этот контакт? Назовите имя."
+                    lastPrompt = prompt
+                    voice.setSpeechRate(if (profile.speech.slowerSpeech) 0.78f else 1.0f)
+                    voice.speak(prompt) {
+                        if (microphoneGranted) voice.startListening()
+                    }
+                }
+
+                fun openContactForm(displayName: String) {
+                    val caller = pendingUnknownCaller ?: return
+                    ContactInsertHelper.launch(this, caller.phoneNumber, displayName)
+                    unknownCallerStore.clear()
+                    pendingUnknownCaller = null
+                    awaitingUnknownCallerConfirmation = false
+                    awaitingContactName = false
+                    speak("Открыта форма нового контакта. Проверьте имя и номер перед сохранением.")
                 }
 
                 fun readLatestNotification() {
@@ -134,7 +175,38 @@ class MainActivity : ComponentActivity() {
                 }
 
                 fun handleRecognized(recognized: String) {
+                    if (awaitingContactName) {
+                        val name = recognized.trim()
+                        if (name.isBlank()) {
+                            askContactName()
+                        } else {
+                            openContactForm(name)
+                        }
+                        return
+                    }
+
                     val command = VoiceCommandRouter.parse(recognized)
+
+                    if (awaitingUnknownCallerConfirmation) {
+                        when (command) {
+                            VoiceCommand.READ -> {
+                                awaitingUnknownCallerConfirmation = false
+                                askContactName()
+                            }
+                            VoiceCommand.LATER -> {
+                                awaitingUnknownCallerConfirmation = false
+                                speak("Хорошо. Номер останется в списке, можно сохранить его позже.")
+                            }
+                            VoiceCommand.REPEAT -> askAboutUnknownCaller()
+                            else -> {
+                                awaitingUnknownCallerConfirmation = true
+                                voice.speak("Не понял. Скажите да, нет или повтори.") {
+                                    if (microphoneGranted) voice.startListening()
+                                }
+                            }
+                        }
+                        return
+                    }
 
                     if (command == VoiceCommand.MISSED) {
                         awaitingNotificationCommand = false
@@ -151,10 +223,10 @@ class MainActivity : ComponentActivity() {
                                 latestEvent = null
                                 speak("Хорошо. Оставлю на потом.")
                             }
-                            VoiceCommand.REPEAT -> lastPrompt?.let(::speakAndListen)
+                            VoiceCommand.REPEAT -> lastPrompt?.let(::speakAndListenNotification)
                             VoiceCommand.MISSED -> Unit
                             VoiceCommand.UNKNOWN -> {
-                                speakAndListen("Не понял ответ. Скажите: прочитай, позже или повтори.")
+                                speakAndListenNotification("Не понял ответ. Скажите: прочитай, позже или повтори.")
                             }
                         }
                         return
@@ -177,6 +249,8 @@ class MainActivity : ComponentActivity() {
                         onError = { error ->
                             voiceError = error
                             awaitingNotificationCommand = false
+                            awaitingUnknownCallerConfirmation = false
+                            awaitingContactName = false
                             listeningForGeneralCommand = false
                         },
                     )
@@ -187,11 +261,17 @@ class MainActivity : ComponentActivity() {
                         latestEvent = event
                         val sender = event.sender.ifBlank { event.appName }
                         val prompt = "Новое сообщение в ${event.appName} от $sender. Прочитать?"
-                        if (microphoneGranted) speakAndListen(prompt) else speak(prompt)
+                        if (microphoneGranted) speakAndListenNotification(prompt) else speak(prompt)
                     }
                     val callListener: (CallEvent) -> Unit = { event ->
                         latestCall = event
                         if (event.incoming) {
+                            if (event.displayName == null && event.phoneNumber.isNotBlank()) {
+                                pendingUnknownCaller = PendingUnknownCaller(
+                                    phoneNumber = event.phoneNumber,
+                                    detectedAt = event.timestampMillis,
+                                )
+                            }
                             val spokenCaller = event.displayName
                                 ?: event.phoneNumber.takeIf { it.isNotBlank() }
                                 ?: "неизвестный номер"
@@ -247,6 +327,7 @@ class MainActivity : ComponentActivity() {
                             profile = profile,
                             latestEvent = latestEvent,
                             latestCall = latestCall,
+                            pendingUnknownCaller = pendingUnknownCaller,
                             contactsGranted = contactsGranted,
                             voiceError = voiceError,
                             onEnableNotificationAccess = {
@@ -271,16 +352,22 @@ class MainActivity : ComponentActivity() {
                                 latestEvent = null
                             },
                             onMissed = { speakMissedEvents() },
+                            onSaveUnknown = {
+                                if (microphoneGranted) askAboutUnknownCaller()
+                                else microphoneLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                            },
                             onListen = {
-                                if (microphoneGranted) {
+                                if (!microphoneGranted) {
+                                    microphoneLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                } else if (pendingUnknownCaller != null) {
+                                    askAboutUnknownCaller()
+                                } else {
                                     listeningForGeneralCommand = true
                                     lastPrompt = "Слушаю."
                                     voice.setSpeechRate(if (profile.speech.slowerSpeech) 0.78f else 1.0f)
                                     voice.speak("Слушаю.") {
                                         voice.startListening()
                                     }
-                                } else {
-                                    microphoneLauncher.launch(Manifest.permission.RECORD_AUDIO)
                                 }
                             },
                             onSpeak = {
@@ -304,6 +391,7 @@ private fun HomeScreen(
     profile: UserProfile,
     latestEvent: NotificationEvent?,
     latestCall: CallEvent?,
+    pendingUnknownCaller: PendingUnknownCaller?,
     contactsGranted: Boolean,
     voiceError: String?,
     onEnableNotificationAccess: () -> Unit,
@@ -312,6 +400,7 @@ private fun HomeScreen(
     onReadNotification: () -> Unit,
     onLater: () -> Unit,
     onMissed: () -> Unit,
+    onSaveUnknown: () -> Unit,
     onListen: () -> Unit,
     onSpeak: () -> Unit,
 ) {
@@ -328,6 +417,14 @@ private fun HomeScreen(
 
         Button(onClick = onMissed, modifier = Modifier.fillMaxWidth().height(64.dp)) {
             Text("Что я пропустил?", fontSize = 20.sp)
+        }
+
+        pendingUnknownCaller?.let { caller ->
+            Text("Неизвестный номер", fontSize = 24.sp)
+            Text(caller.phoneNumber, fontSize = 20.sp)
+            Button(onClick = onSaveUnknown, modifier = Modifier.fillMaxWidth().height(64.dp)) {
+                Text("Сохранить в контакты", fontSize = 20.sp)
+            }
         }
 
         Button(
