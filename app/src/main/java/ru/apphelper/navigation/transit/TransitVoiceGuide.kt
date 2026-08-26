@@ -9,13 +9,14 @@ object TransitVoiceGuide {
             append(".")
         }
 
+        TransitMode.SUBURBAN_TRAIN,
+        TransitMode.TRAIN,
+        TransitMode.AEROEXPRESS -> railLeg(leg)
+
         TransitMode.BUS,
         TransitMode.TROLLEYBUS,
         TransitMode.TRAM,
         TransitMode.METRO,
-        TransitMode.SUBURBAN_TRAIN,
-        TransitMode.TRAIN,
-        TransitMode.AEROEXPRESS,
         TransitMode.OTHER -> vehicleLeg(leg)
 
         TransitMode.TRANSFER -> buildString {
@@ -60,6 +61,27 @@ object TransitVoiceGuide {
         leg.stopCount?.takeIf { it > 0 }?.let { append(". Нужно проехать $it остановок") }
         leg.to?.name?.takeIf { it.isNotBlank() }?.let { append(" и выйти на $it") }
         leg.to?.platform?.takeIf { it.isNotBlank() }?.let { append(", прибытие к платформе $it") }
+        append(".")
+    }
+
+    private fun railLeg(leg: TransitLeg): String = buildString {
+        append(modeName(leg.mode))
+        leg.routeNumber?.takeIf { it.isNotBlank() }?.let { append(" номер $it") }
+        leg.tripTerminalName?.takeIf { it.isNotBlank() }?.let { append(" до конечной $it") }
+        leg.headsign?.takeIf { it.isNotBlank() }?.let { append(". Направление: $it") }
+        leg.originHubName?.takeIf { it.isNotBlank() }?.let { append(". Отправление через $it") }
+        leg.from?.name?.takeIf { it.isNotBlank() }?.let { append(". Садитесь на станции $it") }
+        leg.from?.platform?.takeIf { it.isNotBlank() }?.let { append(", платформа $it") }
+        leg.departureTimeText?.takeIf { it.isNotBlank() }?.let { append(". Отправление $it") }
+        leg.stopCount?.takeIf { it > 0 }?.let { append(". Нужно проехать $it остановок") }
+        leg.to?.name?.takeIf { it.isNotBlank() }?.let { append(" и выйти на станции $it") }
+        leg.to?.platform?.takeIf { it.isNotBlank() }?.let { append(", прибытие к платформе $it") }
+        leg.serviceCalendar?.let { calendar ->
+            calendar.label?.takeIf { it.isNotBlank() }?.let { append(". По данным перевозчика действует $it") }
+            if (!calendar.serviceDateVerified) {
+                append(". Дата поездки не подтверждена календарём перевозчика, расписание нужно перепроверить")
+            }
+        }
         append(".")
     }
 
