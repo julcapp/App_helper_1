@@ -74,17 +74,19 @@ class MainActivity : ComponentActivity() {
                                 microphoneLauncher.launch(Manifest.permission.RECORD_AUDIO)
                             },
                             microphoneGranted = microphoneGranted,
-                            onTestVoice = { text ->
-                                voice.setSpeechRate(if (profile.speech.slowerSpeech) 0.78f else 1.0f)
+                            onTestVoice = { text, slowerSpeech ->
+                                voice.setSpeechRate(if (slowerSpeech) 0.78f else 1.0f)
                                 voice.speak(text)
                             },
                             onFinish = { completed ->
-                                profile = completed.copy(
+                                val completedProfile = completed.copy(
                                     permissions = completed.permissions.copy(
                                         microphoneGranted = microphoneGranted,
                                     ),
+                                    onboardingCompleted = true,
                                 )
-                                store.save(profile)
+                                store.save(completedProfile)
+                                profile = completedProfile
                             },
                         )
                     } else {
@@ -93,9 +95,12 @@ class MainActivity : ComponentActivity() {
                             voiceError = voiceError,
                             onSpeak = {
                                 voice.setSpeechRate(if (profile.speech.slowerSpeech) 0.78f else 1.0f)
-                                voice.speak(
-                                    "Здравствуйте, ${profile.displayName.ifBlank { "я готов помочь" }}. Скажите, что нужно сделать.",
-                                )
+                                val greeting = if (profile.displayName.isBlank()) {
+                                    "Здравствуйте. Я готов помочь. Скажите, что нужно сделать."
+                                } else {
+                                    "Здравствуйте, ${profile.displayName}. Я готов помочь. Скажите, что нужно сделать."
+                                }
+                                voice.speak(greeting)
                             },
                         )
                     }
