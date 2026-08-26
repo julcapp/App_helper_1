@@ -22,6 +22,19 @@ data class UserPermissions(
     val automaticRepliesEnabled: Boolean = false,
 )
 
+data class CarePreferences(
+    /** Общий выключатель ненавязчивых заботливых подсказок. */
+    val enabled: Boolean = true,
+    /** Можно ли спрашивать направление, когда цель движения не определена. */
+    val askDirectionEnabled: Boolean = true,
+    /** Можно ли предлагать помощь с маршрутом домой после длительного отсутствия. */
+    val offerHomeRouteEnabled: Boolean = true,
+    /** Можно ли предлагать короткий отдых после длительного активного движения. */
+    val suggestRestEnabled: Boolean = true,
+    /** Минимальный интервал между повторными заботливыми подсказками одного типа. */
+    val cooldownMinutes: Int = 180,
+)
+
 data class TrustedContact(
     val name: String = "",
     val phone: String = "",
@@ -37,6 +50,7 @@ data class UserProfile(
     val assistanceModes: Set<AssistanceMode> = setOf(AssistanceMode.VOICE_FIRST),
     val speech: SpeechPreferences = SpeechPreferences(),
     val permissions: UserPermissions = UserPermissions(),
+    val care: CarePreferences = CarePreferences(),
     val interests: Set<String> = emptySet(),
     val trustedContact: TrustedContact? = null,
     val safePlaces: List<SafePlace> = emptyList(),
