@@ -90,20 +90,20 @@ class MainActivity : ComponentActivity() {
                     AndroidVoiceAssistant(
                         context = this,
                         onRecognized = { recognized ->
-                            if (!awaitingNotificationCommand) return@AndroidVoiceAssistant
-
-                            when (VoiceCommandRouter.parse(recognized)) {
-                                VoiceCommand.READ -> readLatestNotification()
-                                VoiceCommand.LATER -> {
-                                    awaitingNotificationCommand = false
-                                    latestEvent = null
-                                    voice.speak("Хорошо. Оставлю на потом.")
-                                }
-                                VoiceCommand.REPEAT -> {
-                                    lastPrompt?.let(::speakAndListen)
-                                }
-                                VoiceCommand.UNKNOWN -> {
-                                    speakAndListen("Не понял ответ. Скажите: прочитай, позже или повтори.")
+                            if (awaitingNotificationCommand) {
+                                when (VoiceCommandRouter.parse(recognized)) {
+                                    VoiceCommand.READ -> readLatestNotification()
+                                    VoiceCommand.LATER -> {
+                                        awaitingNotificationCommand = false
+                                        latestEvent = null
+                                        voice.speak("Хорошо. Оставлю на потом.")
+                                    }
+                                    VoiceCommand.REPEAT -> {
+                                        lastPrompt?.let(::speakAndListen)
+                                    }
+                                    VoiceCommand.UNKNOWN -> {
+                                        speakAndListen("Не понял ответ. Скажите: прочитай, позже или повтори.")
+                                    }
                                 }
                             }
                         },
