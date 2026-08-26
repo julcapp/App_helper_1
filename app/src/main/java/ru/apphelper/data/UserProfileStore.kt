@@ -2,6 +2,7 @@ package ru.apphelper.data
 
 import android.content.Context
 import ru.apphelper.domain.AssistanceMode
+import ru.apphelper.domain.CarePreferences
 import ru.apphelper.domain.SpeechPreferences
 import ru.apphelper.domain.TrustedContact
 import ru.apphelper.domain.UserPermissions
@@ -33,6 +34,13 @@ class UserProfileStore(context: Context) {
             permissions = UserPermissions(
                 microphoneGranted = prefs.getBoolean("microphone_granted", false),
             ),
+            care = CarePreferences(
+                enabled = prefs.getBoolean("care_enabled", true),
+                askDirectionEnabled = prefs.getBoolean("care_ask_direction", true),
+                offerHomeRouteEnabled = prefs.getBoolean("care_offer_home_route", true),
+                suggestRestEnabled = prefs.getBoolean("care_suggest_rest", true),
+                cooldownMinutes = prefs.getInt("care_cooldown_minutes", 180).coerceAtLeast(30),
+            ),
             interests = interests,
             trustedContact = if (trustedName.isNotBlank() || trustedPhone.isNotBlank()) {
                 TrustedContact(trustedName, trustedPhone)
@@ -53,6 +61,11 @@ class UserProfileStore(context: Context) {
             .putBoolean("wait_longer", profile.speech.waitLongerForAnswer)
             .putBoolean("repeat_questions", profile.speech.repeatImportantQuestions)
             .putBoolean("microphone_granted", profile.permissions.microphoneGranted)
+            .putBoolean("care_enabled", profile.care.enabled)
+            .putBoolean("care_ask_direction", profile.care.askDirectionEnabled)
+            .putBoolean("care_offer_home_route", profile.care.offerHomeRouteEnabled)
+            .putBoolean("care_suggest_rest", profile.care.suggestRestEnabled)
+            .putInt("care_cooldown_minutes", profile.care.cooldownMinutes)
             .putStringSet("interests", profile.interests)
             .putString("trusted_name", profile.trustedContact?.name.orEmpty())
             .putString("trusted_phone", profile.trustedContact?.phone.orEmpty())
