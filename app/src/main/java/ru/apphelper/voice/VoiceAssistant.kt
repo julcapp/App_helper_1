@@ -5,7 +5,7 @@ package ru.apphelper.voice
  * подключаются отдельно, чтобы UI и Agent Core не зависели от конкретного SDK.
  */
 interface VoiceAssistant {
-    fun speak(text: String)
+    fun speak(text: String, onDone: (() -> Unit)? = null)
     fun setSpeechRate(rate: Float)
     fun startListening()
     fun stopListening()
