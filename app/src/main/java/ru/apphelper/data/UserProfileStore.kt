@@ -37,6 +37,7 @@ class UserProfileStore(context: Context) {
             trustedContact = if (trustedName.isNotBlank() || trustedPhone.isNotBlank()) {
                 TrustedContact(trustedName, trustedPhone)
             } else null,
+            currentCityName = prefs.getString("current_city_name", "").orEmpty(),
             primaryLanguage = prefs.getString("primary_language", "ru") ?: "ru",
             travelLanguages = prefs.getStringSet("travel_languages", setOf("es")).orEmpty(),
             onboardingCompleted = prefs.getBoolean("onboarding_completed", false),
@@ -55,6 +56,7 @@ class UserProfileStore(context: Context) {
             .putStringSet("interests", profile.interests)
             .putString("trusted_name", profile.trustedContact?.name.orEmpty())
             .putString("trusted_phone", profile.trustedContact?.phone.orEmpty())
+            .putString("current_city_name", profile.currentCityName)
             .putString("primary_language", profile.primaryLanguage)
             .putStringSet("travel_languages", profile.travelLanguages)
             .putBoolean("onboarding_completed", profile.onboardingCompleted)
