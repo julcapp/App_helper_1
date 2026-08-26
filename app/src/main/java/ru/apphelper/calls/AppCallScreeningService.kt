@@ -31,6 +31,10 @@ class AppCallScreeningService : CallScreeningService() {
         EventJournal(this).appendCall(event)
         CallEventStore.publish(event)
 
+        if (isIncoming && number.isNotBlank() && displayName == null) {
+            UnknownCallerStore(this).save(number)
+        }
+
         if (isIncoming) {
             respondToCall(
                 callDetails,
