@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.weight
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
@@ -38,7 +39,7 @@ fun OnboardingFlow(
     initialProfile: UserProfile,
     onRequestMicrophone: () -> Unit,
     microphoneGranted: Boolean,
-    onTestVoice: (String) -> Unit,
+    onTestVoice: (String, Boolean) -> Unit,
     onFinish: (UserProfile) -> Unit,
 ) {
     var step by remember { mutableIntStateOf(0) }
@@ -130,7 +131,7 @@ fun OnboardingFlow(
                 Button(
                     onClick = {
                         val name = displayName.ifBlank { "пользователь" }
-                        onTestVoice("Здравствуйте, $name. Голосовой помощник готов к работе.")
+                        onTestVoice("Здравствуйте, $name. Голосовой помощник готов к работе.", slowerSpeech)
                     },
                     modifier = Modifier.fillMaxWidth().height(64.dp),
                 ) {
