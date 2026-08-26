@@ -1,6 +1,7 @@
 package ru.apphelper
 
 import android.Manifest
+import android.app.role.RoleManager
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
@@ -28,6 +29,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import ru.apphelper.calls.CallEvent
+import ru.apphelper.calls.CallEventStore
 import ru.apphelper.data.UserProfileStore
 import ru.apphelper.dialog.VoiceCommand
 import ru.apphelper.dialog.VoiceCommandRouter
@@ -48,16 +51,21 @@ class MainActivity : ComponentActivity() {
                 var profile by remember { mutableStateOf(store.load()) }
                 var microphoneGranted by remember {
                     mutableStateOf(
-                        ContextCompat.checkSelfPermission(
-                            this,
-                            Manifest.permission.RECORD_AUDIO,
-                        ) == PackageManager.PERMISSION_GRANTED,
+                        ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) ==
+                            PackageManager.PERMISSION_GRANTED,
+                    )
+                }
+                var contactsGranted by remember {
+                    mutableStateOf(
+                        ContextCompat.checkSelfPermission(this, Manifest.permission.READ_CONTACTS) ==
+                            PackageManager.PERMISSION_GRANTED,
                     )
                 }
                 var voiceError by remember { mutableStateOf<String?>(null) }
                 var latestEvent by remember {
                     mutableStateOf<NotificationEvent?>(NotificationEventStore.snapshot().firstOrNull())
                 }
+                var latestCall by remember { mutableStateOf<CallEvent?>(null) }
                 var awaitingNotificationCommand by remember { mutableStateOf(false) }
                 var lastPrompt by remember { mutableStateOf<String?>(null) }
 
@@ -98,9 +106,7 @@ class MainActivity : ComponentActivity() {
                                         latestEvent = null
                                         voice.speak("Хорошо. Оставлю на потом.")
                                     }
-                                    VoiceCommand.REPEAT -> {
-                                        lastPrompt?.let(::speakAndListen)
-                                    }
+                                    VoiceCommand.REPEAT -> lastPrompt?.let(::speakAndListen)
                                     VoiceCommand.UNKNOWN -> {
                                         speakAndListen("Не понял ответ. Скажите: прочитай, позже или повтори.")
                                     }
@@ -115,19 +121,27 @@ class MainActivity : ComponentActivity() {
                 }
 
                 DisposableEffect(Unit) {
-                    val listener: (NotificationEvent) -> Unit = { event ->
+                    val notificationListener: (NotificationEvent) -> Unit = { event ->
                         latestEvent = event
                         val sender = event.sender.ifBlank { event.appName }
                         val prompt = "Новое сообщение в ${event.appName} от $sender. Прочитать?"
-                        if (microphoneGranted) {
-                            speakAndListen(prompt)
-                        } else {
-                            voice.speak(prompt)
+                        if (microphoneGranted) speakAndListen(prompt) else voice.speak(prompt)
+                    }
+                    val callListener: (CallEvent) -> Unit = { event ->
+                        latestCall = event
+                        if (event.incoming) {
+                            val spokenCaller = event.displayName
+                                ?: event.phoneNumber.takeIf { it.isNotBlank() }
+                                ?: "неизвестный номер"
+                            voice.setSpeechRate(if (profile.speech.slowerSpeech) 0.78f else 1.0f)
+                            voice.speak("Входящий звонок. $spokenCaller.")
                         }
                     }
-                    NotificationEventStore.addListener(listener)
+                    NotificationEventStore.addListener(notificationListener)
+                    CallEventStore.addListener(callListener)
                     onDispose {
-                        NotificationEventStore.removeListener(listener)
+                        NotificationEventStore.removeListener(notificationListener)
+                        CallEventStore.removeListener(callListener)
                         voice.release()
                     }
                 }
@@ -135,6 +149,14 @@ class MainActivity : ComponentActivity() {
                 val microphoneLauncher = rememberLauncherForActivityResult(
                     ActivityResultContracts.RequestPermission(),
                 ) { granted -> microphoneGranted = granted }
+
+                val contactsLauncher = rememberLauncherForActivityResult(
+                    ActivityResultContracts.RequestPermission(),
+                ) { granted -> contactsGranted = granted }
+
+                val roleLauncher = rememberLauncherForActivityResult(
+                    ActivityResultContracts.StartActivityForResult(),
+                ) { }
 
                 Surface(color = Color(0xFF0E1116)) {
                     if (!profile.onboardingCompleted) {
@@ -163,9 +185,24 @@ class MainActivity : ComponentActivity() {
                         HomeScreen(
                             profile = profile,
                             latestEvent = latestEvent,
+                            latestCall = latestCall,
+                            contactsGranted = contactsGranted,
                             voiceError = voiceError,
                             onEnableNotificationAccess = {
                                 startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+                            },
+                            onRequestContacts = {
+                                contactsLauncher.launch(Manifest.permission.READ_CONTACTS)
+                            },
+                            onRequestCallScreeningRole = {
+                                val roleManager = getSystemService(RoleManager::class.java)
+                                if (roleManager?.isRoleAvailable(RoleManager.ROLE_CALL_SCREENING) == true &&
+                                    !roleManager.isRoleHeld(RoleManager.ROLE_CALL_SCREENING)
+                                ) {
+                                    roleLauncher.launch(
+                                        roleManager.createRequestRoleIntent(RoleManager.ROLE_CALL_SCREENING),
+                                    )
+                                }
                             },
                             onReadNotification = { readLatestNotification() },
                             onLater = {
@@ -193,8 +230,12 @@ class MainActivity : ComponentActivity() {
 private fun HomeScreen(
     profile: UserProfile,
     latestEvent: NotificationEvent?,
+    latestCall: CallEvent?,
+    contactsGranted: Boolean,
     voiceError: String?,
     onEnableNotificationAccess: () -> Unit,
+    onRequestContacts: () -> Unit,
+    onRequestCallScreeningRole: () -> Unit,
     onReadNotification: () -> Unit,
     onLater: () -> Unit,
     onSpeak: () -> Unit,
@@ -209,22 +250,35 @@ private fun HomeScreen(
         Button(
             onClick = onEnableNotificationAccess,
             modifier = Modifier.fillMaxWidth().height(64.dp),
-        ) {
-            Text("Разрешить доступ к уведомлениям", fontSize = 18.sp)
+        ) { Text("Разрешить доступ к уведомлениям", fontSize = 18.sp) }
+
+        if (!contactsGranted) {
+            Button(
+                onClick = onRequestContacts,
+                modifier = Modifier.fillMaxWidth().height(64.dp),
+            ) { Text("Разрешить доступ к контактам", fontSize = 18.sp) }
+        }
+
+        Button(
+            onClick = onRequestCallScreeningRole,
+            modifier = Modifier.fillMaxWidth().height(64.dp),
+        ) { Text("Включить определитель звонков", fontSize = 18.sp) }
+
+        latestCall?.let { call ->
+            Text("Последний звонок", fontSize = 24.sp)
+            Text(call.displayName ?: call.phoneNumber.ifBlank { "Неизвестный номер" }, fontSize = 20.sp)
         }
 
         latestEvent?.let { event ->
             Text("Новое уведомление", fontSize = 24.sp)
             Text("${event.appName}: ${event.sender}", fontSize = 20.sp)
             if (event.text.isNotBlank()) Text(event.text, fontSize = 18.sp)
-            Button(
-                onClick = onReadNotification,
-                modifier = Modifier.fillMaxWidth().height(64.dp),
-            ) { Text("Прочитать", fontSize = 20.sp) }
-            Button(
-                onClick = onLater,
-                modifier = Modifier.fillMaxWidth().height(64.dp),
-            ) { Text("Позже", fontSize = 20.sp) }
+            Button(onClick = onReadNotification, modifier = Modifier.fillMaxWidth().height(64.dp)) {
+                Text("Прочитать", fontSize = 20.sp)
+            }
+            Button(onClick = onLater, modifier = Modifier.fillMaxWidth().height(64.dp)) {
+                Text("Позже", fontSize = 20.sp)
+            }
         }
 
         Button(onClick = onSpeak, modifier = Modifier.fillMaxWidth().height(60.dp)) {
