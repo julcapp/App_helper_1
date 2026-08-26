@@ -4,6 +4,7 @@ enum class VoiceCommand {
     READ,
     LATER,
     REPEAT,
+    MISSED,
     UNKNOWN,
 }
 
@@ -12,6 +13,7 @@ object VoiceCommandRouter {
         val text = raw.trim().lowercase()
 
         return when {
+            listOf("что я пропустил", "что пропустил", "что было", "пропущенные события", "пропущенные").any { it in text } -> VoiceCommand.MISSED
             listOf("да", "прочитай", "читать", "читай", "озвучь", "расскажи").any { it in text } -> VoiceCommand.READ
             listOf("нет", "позже", "не сейчас", "отложи", "пропусти").any { it in text } -> VoiceCommand.LATER
             listOf("повтори", "ещё раз", "еще раз", "повторить").any { it in text } -> VoiceCommand.REPEAT
