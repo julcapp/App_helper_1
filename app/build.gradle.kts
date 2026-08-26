@@ -40,5 +40,6 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")
+    implementation("com.google.android.gms:play-services-location:21.4.0")
     debugImplementation("androidx.compose.ui:ui-tooling")
 }
