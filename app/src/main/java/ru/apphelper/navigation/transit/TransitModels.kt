@@ -26,6 +26,21 @@ data class GeoPoint(
     val longitude: Double,
 )
 
+data class CityContext(
+    /** Город, определённый по текущей геопозиции или подтверждённый пользователем. */
+    val cityName: String,
+    /** Регион/субъект/область для устранения неоднозначности одинаковых названий городов. */
+    val regionName: String? = null,
+    /** Код страны ISO 3166-1 alpha-2, например RU или ES, если он известен. */
+    val countryCode: String? = null,
+    /** Источник определения города: reverse-geocoder, provider, user-confirmed и т.п. */
+    val source: String? = null,
+    /** Время последнего обновления контекста. */
+    val resolvedAtMillis: Long = System.currentTimeMillis(),
+    /** Пользователь явно подтвердил или задал город вручную. */
+    val userConfirmed: Boolean = false,
+)
+
 data class TransitStop(
     val name: String,
     val point: GeoPoint? = null,
@@ -73,6 +88,8 @@ data class TransitRoute(
     val provider: String,
     val origin: GeoPoint,
     val destination: GeoPoint,
+    /** Географический контекст, по которому выбран локальный транспортный источник и его данные. */
+    val cityContext: CityContext? = null,
     val legs: List<TransitLeg>,
     val totalDurationSeconds: Int? = null,
     val generatedAtMillis: Long = System.currentTimeMillis(),
