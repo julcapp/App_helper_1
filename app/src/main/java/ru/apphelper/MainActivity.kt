@@ -50,6 +50,9 @@ import ru.apphelper.location.LocationAssistant
 import ru.apphelper.location.NavigationHelper
 import ru.apphelper.location.SafeLocation
 import ru.apphelper.location.SafePlaceStore
+import ru.apphelper.messages.CurrentMessageSession
+import ru.apphelper.messages.MessageFactCommand
+import ru.apphelper.messages.MessageFactsExtractor
 import ru.apphelper.notifications.NotificationEvent
 import ru.apphelper.notifications.NotificationEventStore
 import ru.apphelper.profile.ProfileTuningSession
@@ -86,6 +89,7 @@ class MainActivity : ComponentActivity() {
                 var latestEvent by remember {
                     mutableStateOf<NotificationEvent?>(NotificationEventStore.snapshot().firstOrNull())
                 }
+                var currentMessageSession by remember { mutableStateOf<CurrentMessageSession?>(null) }
                 var latestCall by remember { mutableStateOf<CallEvent?>(null) }
                 var pendingUnknownCaller by remember {
                     mutableStateOf<PendingUnknownCaller?>(unknownCallerStore.load())
@@ -94,6 +98,7 @@ class MainActivity : ComponentActivity() {
                 var lastKnownLocation by remember { mutableStateOf<DeviceLocation?>(null) }
 
                 var awaitingNotificationCommand by remember { mutableStateOf(false) }
+                var awaitingMessageFollowUp by remember { mutableStateOf(false) }
                 var awaitingUnknownCallerConfirmation by remember { mutableStateOf(false) }
                 var awaitingContactName by remember { mutableStateOf(false) }
                 var listeningForGeneralCommand by remember { mutableStateOf(false) }
@@ -132,6 +137,7 @@ class MainActivity : ComponentActivity() {
                         return
                     }
                     awaitingNotificationCommand = false
+                    awaitingMessageFollowUp = false
                     awaitingUnknownCallerConfirmation = false
                     awaitingContactName = false
                     listeningForGeneralCommand = false
@@ -175,15 +181,53 @@ class MainActivity : ComponentActivity() {
                 fun readLatestNotification() {
                     latestEvent?.let { event ->
                         awaitingNotificationCommand = false
+                        currentMessageSession = CurrentMessageSession(event)
+                        awaitingMessageFollowUp = true
                         val spoken = if (event.text.isBlank()) {
                             "В уведомлении нет доступного текста."
                         } else {
                             val sender = event.sender.ifBlank { event.appName }
                             "$sender. ${event.text}"
                         }
-                        speak(spoken)
-                        latestEvent = null
+                        speakAndListen(
+                            "$spoken. Можете сказать: повтори, есть ли дата, время, телефон, сумма или ссылка.",
+                        )
                     }
+                }
+
+                fun closeCurrentMessage() {
+                    awaitingMessageFollowUp = false
+                    currentMessageSession = null
+                    latestEvent = null
+                    speak("Хорошо. Закрываю это сообщение.")
+                }
+
+                fun answerMessageFact(command: MessageFactCommand) {
+                    val session = currentMessageSession
+                    if (session == null || !session.hasReadableText) {
+                        speak("Сейчас нет сообщения с доступным текстом.")
+                        return
+                    }
+                    awaitingMessageFollowUp = true
+                    speakAndListen(MessageFactsExtractor.answer(command, session.originalText))
+                }
+
+                fun explainMessageNotYetConnected() {
+                    awaitingMessageFollowUp = true
+                    speakAndListen(
+                        "Чтобы не додумывать смысл сообщения, я пока не буду пересказывать его без подключённого AI-модуля. " +
+                            "Я могу дословно повторить сообщение или назвать найденные в тексте дату, время, телефон, сумму и ссылку.",
+                    )
+                }
+
+                fun repeatCurrentMessage() {
+                    val session = currentMessageSession
+                    if (session == null || !session.hasReadableText) {
+                        speak("Сейчас нет сообщения с доступным текстом.")
+                        return
+                    }
+                    awaitingMessageFollowUp = true
+                    speakAndListen("Дословно: ${session.originalText}")
                 }
 
                 fun speakMissedEvents() {
@@ -313,6 +357,27 @@ class MainActivity : ComponentActivity() {
                         return
                     }
 
+                    if (awaitingMessageFollowUp && currentMessageSession != null) {
+                        when (command) {
+                            VoiceCommand.READ,
+                            VoiceCommand.REPEAT -> repeatCurrentMessage()
+                            VoiceCommand.MESSAGE_DATE -> answerMessageFact(MessageFactCommand.DATE)
+                            VoiceCommand.MESSAGE_TIME -> answerMessageFact(MessageFactCommand.TIME)
+                            VoiceCommand.MESSAGE_PHONE -> answerMessageFact(MessageFactCommand.PHONE)
+                            VoiceCommand.MESSAGE_AMOUNT -> answerMessageFact(MessageFactCommand.AMOUNT)
+                            VoiceCommand.MESSAGE_LINK -> answerMessageFact(MessageFactCommand.LINK)
+                            VoiceCommand.EXPLAIN_MESSAGE,
+                            VoiceCommand.SIMPLIFY_MESSAGE,
+                            VoiceCommand.MESSAGE_MAIN_POINT -> explainMessageNotYetConnected()
+                            VoiceCommand.CLOSE_MESSAGE,
+                            VoiceCommand.LATER -> closeCurrentMessage()
+                            else -> speakAndListen(
+                                "Я работаю с текущим сообщением. Скажите: повтори, есть ли дата, время, телефон, сумма, ссылка или закрой сообщение.",
+                            )
+                        }
+                        return
+                    }
+
                     if (listeningForGeneralCommand) {
                         listeningForGeneralCommand = false
                         when (command) {
@@ -336,6 +401,7 @@ class MainActivity : ComponentActivity() {
                         onError = { error ->
                             voiceError = error
                             awaitingNotificationCommand = false
+                            awaitingMessageFollowUp = false
                             awaitingUnknownCallerConfirmation = false
                             awaitingContactName = false
                             listeningForGeneralCommand = false
@@ -346,6 +412,8 @@ class MainActivity : ComponentActivity() {
                 DisposableEffect(Unit) {
                     val notificationListener: (NotificationEvent) -> Unit = { event ->
                         latestEvent = event
+                        currentMessageSession = null
+                        awaitingMessageFollowUp = false
                         val sender = event.sender.ifBlank { event.appName }
                         val prompt = "Новое сообщение в ${event.appName} от $sender. Прочитать?"
                         if (microphoneGranted) speakAndListenNotification(prompt) else speak(prompt)
@@ -459,6 +527,8 @@ class MainActivity : ComponentActivity() {
                             onReadNotification = { readLatestNotification() },
                             onLater = {
                                 awaitingNotificationCommand = false
+                                awaitingMessageFollowUp = false
+                                currentMessageSession = null
                                 latestEvent = null
                             },
                             onMissed = { speakMissedEvents() },
@@ -481,6 +551,9 @@ class MainActivity : ComponentActivity() {
                                     microphoneLauncher.launch(Manifest.permission.RECORD_AUDIO)
                                 } else if (pendingUnknownCaller != null) {
                                     askAboutUnknownCaller()
+                                } else if (awaitingMessageFollowUp && currentMessageSession != null) {
+                                    lastPrompt = "Слушаю команду по сообщению."
+                                    voice.speak("Слушаю команду по сообщению.") { voice.startListening() }
                                 } else {
                                     listeningForGeneralCommand = true
                                     lastPrompt = "Слушаю."
