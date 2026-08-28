@@ -3,6 +3,9 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+val aiGatewayUrl = providers.gradleProperty("AI_GATEWAY_URL").orElse("").get()
+val escapedAiGatewayUrl = aiGatewayUrl.replace("\\", "\\\\").replace("\"", "\\\"")
+
 android {
     namespace = "ru.apphelper"
     compileSdk = 37
@@ -13,10 +16,12 @@ android {
         targetSdk = 37
         versionCode = 1
         versionName = "0.1.0"
+        buildConfigField("String", "AI_GATEWAY_URL", "\"$escapedAiGatewayUrl\"")
     }
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     compileOptions {
