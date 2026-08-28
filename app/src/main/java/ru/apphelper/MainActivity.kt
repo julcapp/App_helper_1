@@ -50,7 +50,10 @@ import ru.apphelper.location.LocationAssistant
 import ru.apphelper.location.NavigationHelper
 import ru.apphelper.location.SafeLocation
 import ru.apphelper.location.SafePlaceStore
+import ru.apphelper.messages.AnalysisUncertainty
 import ru.apphelper.messages.CurrentMessageSession
+import ru.apphelper.messages.HttpMessageAnalysisProvider
+import ru.apphelper.messages.MessageAnalysis
 import ru.apphelper.messages.MessageFactCommand
 import ru.apphelper.messages.MessageFactsExtractor
 import ru.apphelper.notifications.NotificationEvent
@@ -69,6 +72,7 @@ class MainActivity : ComponentActivity() {
         val unknownCallerStore = UnknownCallerStore(this)
         val safePlaceStore = SafePlaceStore(this)
         val locationAssistant = LocationAssistant(this)
+        val messageAnalysisProvider = HttpMessageAnalysisProvider(BuildConfig.AI_GATEWAY_URL)
 
         setContent {
             AppHelperTheme {
@@ -190,7 +194,7 @@ class MainActivity : ComponentActivity() {
                             "$sender. ${event.text}"
                         }
                         speakAndListen(
-                            "$spoken. Можете сказать: повтори, есть ли дата, время, телефон, сумма или ссылка.",
+                            "$spoken. Можете сказать: повтори, объясни, скажи проще, что главное, что от меня хотят, есть ли дата, время, телефон, сумма или ссылка.",
                         )
                     }
                 }
@@ -212,11 +216,43 @@ class MainActivity : ComponentActivity() {
                     speakAndListen(MessageFactsExtractor.answer(command, session.originalText))
                 }
 
-                fun explainMessageNotYetConnected() {
-                    awaitingMessageFollowUp = true
-                    speakAndListen(
-                        "Чтобы не додумывать смысл сообщения, я пока не буду пересказывать его без подключённого AI-модуля. " +
-                            "Я могу дословно повторить сообщение или назвать найденные в тексте дату, время, телефон, сумму и ссылку.",
+                fun formatAnalysis(command: VoiceCommand, analysis: MessageAnalysis): String {
+                    val uncertaintyPrefix = when (analysis.uncertainty) {
+                        AnalysisUncertainty.LOW -> ""
+                        AnalysisUncertainty.MEDIUM -> "Смысл сообщения может быть немного неоднозначным. "
+                        AnalysisUncertainty.HIGH -> "Сообщение неоднозначно, поэтому это только осторожная интерпретация. "
+                    }
+                    val body = when (command) {
+                        VoiceCommand.MESSAGE_MAIN_POINT -> analysis.summary.ifBlank { "Не удалось выделить главное без домыслов." }
+                        VoiceCommand.MESSAGE_REQUEST -> analysis.explicitRequest
+                            ?: "В сообщении нет однозначно сформулированной просьбы или ожидаемого действия."
+                        VoiceCommand.EXPLAIN_MESSAGE,
+                        VoiceCommand.SIMPLIFY_MESSAGE -> analysis.plainExplanation.ifBlank {
+                            "Не удалось объяснить сообщение без добавления новых предположений."
+                        }
+                        else -> analysis.summary
+                    }
+                    return uncertaintyPrefix + body
+                }
+
+                fun analyzeCurrentMessage(command: VoiceCommand) {
+                    val session = currentMessageSession
+                    if (session == null || !session.hasReadableText) {
+                        speak("Сейчас нет сообщения с доступным текстом.")
+                        return
+                    }
+                    awaitingMessageFollowUp = false
+                    speak("Анализирую сообщение.")
+                    messageAnalysisProvider.analyze(
+                        originalText = session.originalText,
+                        onSuccess = { analysis ->
+                            awaitingMessageFollowUp = true
+                            speakAndListen(formatAnalysis(command, analysis))
+                        },
+                        onError = { error ->
+                            awaitingMessageFollowUp = true
+                            speakAndListen(error)
+                        },
                     )
                 }
 
@@ -368,11 +404,12 @@ class MainActivity : ComponentActivity() {
                             VoiceCommand.MESSAGE_LINK -> answerMessageFact(MessageFactCommand.LINK)
                             VoiceCommand.EXPLAIN_MESSAGE,
                             VoiceCommand.SIMPLIFY_MESSAGE,
-                            VoiceCommand.MESSAGE_MAIN_POINT -> explainMessageNotYetConnected()
+                            VoiceCommand.MESSAGE_MAIN_POINT,
+                            VoiceCommand.MESSAGE_REQUEST -> analyzeCurrentMessage(command)
                             VoiceCommand.CLOSE_MESSAGE,
                             VoiceCommand.LATER -> closeCurrentMessage()
                             else -> speakAndListen(
-                                "Я работаю с текущим сообщением. Скажите: повтори, есть ли дата, время, телефон, сумма, ссылка или закрой сообщение.",
+                                "Я работаю с текущим сообщением. Скажите: повтори, объясни, скажи проще, что главное, что от меня хотят, есть ли дата, время, телефон, сумма, ссылка или закрой сообщение.",
                             )
                         }
                         return
