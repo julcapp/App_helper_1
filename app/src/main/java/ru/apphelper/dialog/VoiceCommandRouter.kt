@@ -7,6 +7,7 @@ enum class VoiceCommand {
     EXPLAIN_MESSAGE,
     SIMPLIFY_MESSAGE,
     MESSAGE_MAIN_POINT,
+    MESSAGE_REQUEST,
     MESSAGE_DATE,
     MESSAGE_TIME,
     MESSAGE_PHONE,
@@ -29,6 +30,7 @@ object VoiceCommandRouter {
             listOf("объясни сообщение", "объясни", "что это значит", "что значит сообщение").any { it in text } -> VoiceCommand.EXPLAIN_MESSAGE
             listOf("скажи проще", "проще", "объясни проще", "простыми словами").any { it in text } -> VoiceCommand.SIMPLIFY_MESSAGE
             listOf("что здесь главное", "что главное", "главное в сообщении", "скажи главное").any { it in text } -> VoiceCommand.MESSAGE_MAIN_POINT
+            listOf("что от меня хотят", "что от меня хочет", "что он хочет", "что она хочет", "что нужно сделать", "что просят").any { it in text } -> VoiceCommand.MESSAGE_REQUEST
             listOf("есть ли дата", "какая дата", "назови дату", "дата в сообщении").any { it in text } -> VoiceCommand.MESSAGE_DATE
             listOf("есть ли время", "какое время", "назови время", "время в сообщении").any { it in text } -> VoiceCommand.MESSAGE_TIME
             listOf("есть ли телефон", "какой телефон", "номер телефона", "телефон в сообщении").any { it in text } -> VoiceCommand.MESSAGE_PHONE
