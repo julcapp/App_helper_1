@@ -2,6 +2,7 @@ package ru.apphelper.channels
 
 import android.app.Notification
 import android.app.RemoteInput
+import android.os.Build
 
 /**
  * Observation only: never invokes PendingIntent or sends a message.
@@ -19,7 +20,8 @@ object AndroidReplyCapability {
     fun inspect(notificationKey: String, packageName: String, notification: Notification): ReplyCapability {
         val actions = notification.actions.orEmpty()
         val replyCount = actions.count { action ->
-            action.actionIntent != null && !action.actionIntent.isImmutable &&
+            action.actionIntent != null &&
+                (Build.VERSION.SDK_INT < Build.VERSION_CODES.S || !action.actionIntent.isImmutable) &&
                 action.remoteInputs.orEmpty().any { input: RemoteInput ->
                     input.allowFreeFormInput && input.resultKey.isNotBlank()
                 }
