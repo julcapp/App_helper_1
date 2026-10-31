@@ -42,3 +42,6 @@ Implement the user-facing 'Мои мысли и предложения' module a
 
 ## Updated feedback requirements
 See the newer clarification in docs/TECHNICAL_SPECIFICATION.md: thought drafts and unfinished input are automatically queued for CRM synchronization, and CRM notifies an administrator only after server acknowledgment. Clear prior notice and the legally necessary separate personal-data consent remain prerequisites for rollout. Keep Technical Support separate.
+
+## 2GIS maps and trusted people
+See GEO-01..11 in docs/TECHNICAL_SPECIFICATION.md. Use 2GIS as a map/search/routing/navigation provider candidate; location permissions come from Android, sharing with family uses a separate consent-controlled App_helper_1 server module. Never invent a 2GIS family-tracking API. No hidden location monitoring or CRM access. Support TalkBack, revocation, expiring links and foreground-service requirements.
