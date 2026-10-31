@@ -2,7 +2,7 @@
 
 ## Project
 Android-first, voice-first accessibility assistant for blind, low-vision, older and motor-impaired users.
-Read `README.md`, `docs/MESSAGE_ASSISTANT.md`, `docs/ARCHITECTURE.md`, `docs/ROADMAP.md`, `docs/UX_DISCOVERY_ACCESSIBILITY_2026-10-31.md` and `docs/CODEX_HANDOFF.md` before changes.
+Read `docs/TECHNICAL_SPECIFICATION.md` as the consolidated baseline, then `README.md`, `docs/MESSAGE_ASSISTANT.md`, `docs/ARCHITECTURE.md`, `docs/ROADMAP.md`, `docs/UX_DISCOVERY_ACCESSIBILITY_2026-10-31.md` and `docs/CODEX_HANDOFF.md` before changes.
 
 ## Mandatory discovery skills
 Use **Discovery Interview** to convert vague requests into explicit, testable technical requirements.
