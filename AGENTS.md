@@ -72,3 +72,6 @@ See I18N-01..02, PHONE-01 and SOS-69..74 in docs/TECHNICAL_SPECIFICATION.md. Sup
 
 ## Approved international phone formats and SOS language
 Implement requirements I18N-SOS-01..09 in docs/TECHNICAL_SPECIFICATION.md when coding is authorized: country-aware phone mask and canonical E.164 storage; emergency number is separate and based on the device's current country/network, not the user's SIM/account code; prepare operator text in the current country's appropriate language, validated in advance with editable local preview. Keep passport/OMS strictly local. Do not claim Android can inject TTS into an emergency call.
+
+## International subscription pricing
+Approved: after one shared 90-day trial, Russian regional subscription is RUB 950/month and outside-Russia subscription is USD 19.90/month. Keep one subscription across the user's devices; recurring billing requires separate consent. Billing region cannot be determined solely from GPS/SIM/IP, and international payment integration and region transition rules remain open. See BILL-INT-01..07 in docs/TECHNICAL_SPECIFICATION.md.
