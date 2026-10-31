@@ -353,6 +353,8 @@ class MainActivity : ComponentActivity() {
                 }
 
                 fun handleRecognized(recognized: String) {
+                    // Ignore callbacks after cancellation or once an utterance has already been processed.
+                    if (voicePhase !is VoicePhase.AwaitingSpeech) return
                     voicePhase = VoiceInteractionReducer.reduce(voicePhase, VoiceEvent.Recognized(recognized))
                     voiceError = null
                     if (awaitingContactName) {
@@ -614,13 +616,10 @@ class MainActivity : ComponentActivity() {
                                 } else if (pendingUnknownCaller != null) {
                                     askAboutUnknownCaller()
                                 } else if (awaitingMessageFollowUp && currentMessageSession != null) {
-                                    lastPrompt = "Слушаю команду по сообщению."
-                                    voice.speak("Слушаю команду по сообщению.") { voice.startListening() }
+                                    speakAndListen("Слушаю команду по сообщению.")
                                 } else {
                                     listeningForGeneralCommand = true
-                                    lastPrompt = "Слушаю."
-                                    voice.setSpeechRate(if (profile.speech.slowerSpeech) 0.78f else 1.0f)
-                                    voice.speak("Слушаю.") { voice.startListening() }
+                                    speakAndListen("Слушаю.")
                                 }
                             },
                             onRepeat = {
