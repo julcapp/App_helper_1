@@ -803,7 +803,7 @@ private fun HomeScreen(
                     description = "Получатель не подтверждён: ${replyDraft.displayedSender}. Отправка пока недоступна.",
                 )
                 if (recipientReview != null && !recipientReview.confirmedForDisplay) {
-                    AccessibleAction(label = "Проверил имя получателя", onClick = onConfirmRecipientDisplay)
+                    AccessibleAction(label = "Отображаемое имя проверено, адрес ещё не установлен", onClick = onConfirmRecipientDisplay)
                 }
                 OutlinedTextField(
                     value = replyDraft.text,
