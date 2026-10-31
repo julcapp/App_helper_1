@@ -7,4 +7,5 @@ data class NotificationEvent(
     val sender: String,
     val text: String,
     val receivedAt: Long,
+    val quickReplyAvailable: Boolean = false,
 )
