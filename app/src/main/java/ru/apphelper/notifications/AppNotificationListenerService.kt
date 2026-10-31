@@ -4,6 +4,8 @@ import android.app.Notification
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import ru.apphelper.journal.EventJournal
+import ru.apphelper.channels.MessageChannelRegistry
+import ru.apphelper.channels.MessageChannel
 
 class AppNotificationListenerService : NotificationListenerService() {
 
@@ -23,10 +25,13 @@ class AppNotificationListenerService : NotificationListenerService() {
             packageManager.getApplicationLabel(info).toString()
         }.getOrDefault(status.packageName)
 
+        val channel = MessageChannelRegistry.detect(status.packageName)
+        val channelName = if (channel == MessageChannel.OTHER) appName else MessageChannelRegistry.label(channel)
+
         val event = NotificationEvent(
             id = status.key,
             packageName = status.packageName,
-            appName = appName,
+            appName = channelName,
             sender = title.ifBlank { appName },
             text = body,
             receivedAt = status.postTime,
