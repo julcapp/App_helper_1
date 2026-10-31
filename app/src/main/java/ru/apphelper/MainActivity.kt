@@ -222,6 +222,7 @@ class MainActivity : ComponentActivity() {
                     awaitingMessageFollowUp = false
                     currentMessageSession = null
                     replyDraft = null
+                    awaitingDraftDictation = false
                     latestEvent = messageQueue.selected
                     val next = latestEvent
                     if (next != null) {
