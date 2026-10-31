@@ -48,3 +48,6 @@ See GEO-01..11 in docs/TECHNICAL_SPECIFICATION.md. Use 2GIS as a map/search/rout
 
 ## User-selectable map providers
 Users choose Google Maps, Yandex Maps or 2GIS. Persist preference per account and allow per-route override. Separate Android location, maps, routing, navigation and trusted-person location sharing. External-app navigation is a valid initial implementation but must be clearly labeled; embedded SDK integration needs licensing/API verification. See MAP-01..09 in docs/TECHNICAL_SPECIFICATION.md.
+
+## Emergency assistance design
+Review SOS-01..10 in docs/TECHNICAL_SPECIFICATION.md. Distinguish emergency system calling from trusted-person alerts, never assert delivery before acknowledgment, never guarantee rescue, preserve TalkBack and non-network fallbacks, and do not gate emergency calling on a paid subscription. This remains a design requirement; do not implement without later user instruction.
