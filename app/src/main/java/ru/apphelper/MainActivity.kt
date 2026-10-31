@@ -62,6 +62,7 @@ import ru.apphelper.messages.MessageFactCommand
 import ru.apphelper.messages.MessageFactsExtractor
 import ru.apphelper.messages.MessageQueue
 import ru.apphelper.messages.ReplyDraft
+import ru.apphelper.messages.RecipientReview
 import ru.apphelper.notifications.NotificationEvent
 import ru.apphelper.notifications.NotificationEventStore
 import ru.apphelper.profile.ProfileTuningSession
@@ -104,6 +105,7 @@ class MainActivity : ComponentActivity() {
                 var currentMessageSession by remember { mutableStateOf<CurrentMessageSession?>(null) }
                 var replyDraft by remember { mutableStateOf<ReplyDraft?>(null) }
                 var awaitingDraftDictation by remember { mutableStateOf(false) }
+                var recipientReview by remember { mutableStateOf<RecipientReview?>(null) }
                 var latestCall by remember { mutableStateOf<CallEvent?>(null) }
                 var pendingUnknownCaller by remember {
                     mutableStateOf<PendingUnknownCaller?>(unknownCallerStore.load())
@@ -202,6 +204,7 @@ class MainActivity : ComponentActivity() {
                         awaitingNotificationCommand = false
                         currentMessageSession = CurrentMessageSession(event)
                         replyDraft = null
+                        recipientReview = null
                         awaitingDraftDictation = false
                         awaitingMessageFollowUp = true
                         val spoken = if (event.text.isBlank()) {
@@ -222,6 +225,7 @@ class MainActivity : ComponentActivity() {
                     awaitingMessageFollowUp = false
                     currentMessageSession = null
                     replyDraft = null
+                    recipientReview = null
                     awaitingDraftDictation = false
                     latestEvent = messageQueue.selected
                     val next = latestEvent
@@ -501,6 +505,7 @@ class MainActivity : ComponentActivity() {
                     val callListener: (CallEvent) -> Unit = { event ->
                         latestCall = event
                         if (event.incoming) {
+                            awaitingDraftDictation = false
                             voice.stopListening()
                             voice.stopSpeaking()
                             voicePhase = VoiceInteractionReducer.reduce(voicePhase, VoiceEvent.Cancel)
@@ -609,9 +614,12 @@ class MainActivity : ComponentActivity() {
                             },
                             currentMessage = currentMessageSession,
                             replyDraft = replyDraft,
+                            recipientReview = recipientReview,
+                            onConfirmRecipientDisplay = { recipientReview = recipientReview?.confirmDisplay() },
                             onStartDraft = {
                                 currentMessageSession?.let { session ->
                                     replyDraft = ReplyDraft(session.event.id, session.source, session.sender)
+                                    recipientReview = RecipientReview(session.event.id, session.source, session.sender)
                                 }
                             },
                             onDraftTextChange = { value -> replyDraft = replyDraft?.edit(value) },
@@ -628,7 +636,7 @@ class MainActivity : ComponentActivity() {
                                     speak("Черновик для ${it.displayedSender}. Текст: ${it.text}. Это только черновик, отправка недоступна.")
                                 }
                             },
-                            onDiscardDraft = { replyDraft = null; awaitingDraftDictation = false },
+                            onDiscardDraft = { replyDraft = null; recipientReview = null; awaitingDraftDictation = false },
                             onReadNotification = { readLatestNotification() },
                             onRepeatMessage = { repeatCurrentMessage() },
                             onExplainMessage = { analyzeCurrentMessage(VoiceCommand.EXPLAIN_MESSAGE) },
@@ -721,6 +729,8 @@ private fun HomeScreen(
     latestEvent: NotificationEvent?,
     currentMessage: CurrentMessageSession?,
     replyDraft: ReplyDraft?,
+    recipientReview: RecipientReview?,
+    onConfirmRecipientDisplay: () -> Unit,
     onStartDraft: () -> Unit,
     onDraftTextChange: (String) -> Unit,
     onDictateDraft: () -> Unit,
@@ -792,6 +802,9 @@ private fun HomeScreen(
                     title = "Черновик ответа",
                     description = "Получатель не подтверждён: ${replyDraft.displayedSender}. Отправка пока недоступна.",
                 )
+                if (recipientReview != null && !recipientReview.confirmedForDisplay) {
+                    AccessibleAction(label = "Проверил имя получателя", onClick = onConfirmRecipientDisplay)
+                }
                 OutlinedTextField(
                     value = replyDraft.text,
                     onValueChange = onDraftTextChange,
