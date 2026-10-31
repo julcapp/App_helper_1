@@ -60,3 +60,6 @@ See SOS-16..23 in docs/TECHNICAL_SPECIFICATION.md: max 3 trusted contacts; user 
 
 ## Lock-screen emergency card and 112 agent feasibility
 Review SOS-31..39 in docs/TECHNICAL_SPECIFICATION.md. After SOS contact notification, display persistent emergency card on lock screen only where platform permits and provide bottom close control 'Помощь оказывается — закрыть'. Full-screen intent is restricted on modern Android. AI answering detection, TTS injection and dialogue with emergency 112 operator are future feasibility research requiring authorized telecom/emergency integration; no unsupported implementation claims, no live 112 test calls without approval.
+
+## Local-only passport and medical insurance SOS fields
+See SOS-40..47 in docs/TECHNICAL_SPECIFICATION.md. Passport and OMS insurance number are strictly per-device encrypted local fields, with no CRM, server sync, backups, analytics, logs, push, or cross-device transfer. They may be shown to emergency responders when explicitly requested and only shared via an authorized, verified channel. Protect full document details from casual lockscreen exposure.
