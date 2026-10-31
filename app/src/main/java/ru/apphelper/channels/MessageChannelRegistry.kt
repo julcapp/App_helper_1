@@ -22,7 +22,8 @@ private class PackageAdapter(
 
 object MessageChannelRegistry {
     private val adapters: List<MessageChannelAdapter> = listOf(
-        // MAX package must be checked on a real installed build; never guess it.
+        // MAX Android package from the published app store listing.
+        PackageAdapter(MessageChannel.MAX, setOf("ru.oneme.app")),
         PackageAdapter(MessageChannel.TELEGRAM, setOf(
             "org.telegram.messenger",
             "org.telegram.messenger.web",
