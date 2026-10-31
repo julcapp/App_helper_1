@@ -90,3 +90,6 @@ The project owner approved using Codex to build the shared voice AI-agent platfo
 
 ## AI agents CRM admin dashboard
 See CRM-AI-01..11 in docs/TECHNICAL_SPECIFICATION.md: operational monitoring, STT/LLM/TTS provider configuration, limits, cost ledger, privacy-safe technical diagnosis, RBAC/audit, provider fallback and isolated tests. No raw conversations or memory in regular CRM logs. Implementation through Codex requires explicit later authorization.
+
+## Inbox implementation authorized 31.10.2026
+The owner explicitly approved implementation of the first local inbox-reading stage («Принимается делаем»). This supersedes earlier postponement for this stage only. Follow INBOX-01..10 and docs/superpowers/specs/2026-10-31-inbox-reading-design.md. Preserve local-only notification content, explicit screen-reading activation, bounded queue and truthful preview semantics. Full account/mail integrations remain separate. Do not claim physical Android/TalkBack tests from a successful build.

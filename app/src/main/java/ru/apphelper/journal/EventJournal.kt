@@ -21,13 +21,24 @@ data class JournalEvent(
 class EventJournal(context: Context) {
     private val prefs = context.getSharedPreferences("event_journal", Context.MODE_PRIVATE)
 
+    init {
+        if (!prefs.getBoolean("notification_metadata_only", false)) {
+            saveAll(loadAll().map { event ->
+                if (event.type == JournalEventType.NOTIFICATION) {
+                    event.copy(title = "Входящее уведомление", body = "")
+                } else event
+            })
+            prefs.edit().putBoolean("notification_metadata_only", true).apply()
+        }
+    }
+
     fun appendNotification(event: NotificationEvent) {
         append(
             JournalEvent(
                 id = "notification:${event.id}:${event.receivedAt}",
                 type = JournalEventType.NOTIFICATION,
-                title = event.sender.ifBlank { event.appName },
-                body = event.text,
+                title = "Входящее уведомление",
+                body = "",
                 source = event.appName,
                 timestampMillis = event.receivedAt,
             ),
