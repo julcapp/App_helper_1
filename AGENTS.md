@@ -69,3 +69,6 @@ Approved: large Android home-screen SOS widget and optional persistent-notificat
 
 ## Internationalization and localized emergency dialing
 See I18N-01..02, PHONE-01 and SOS-69..74 in docs/TECHNICAL_SPECIFICATION.md. Support ru/en/es/zh-Hans/ar (RTL), country-specific E.164 contact-number formatting, and emergency calling according to current network/location rather than the account/SIM country code. Russian emergency number is 112 even for a foreign +375 account currently in Russia. Never prepend +country code to 112/911; do not assume all international numbers are 11 digits. No implementation requested yet.
+
+## Approved international phone formats and SOS language
+Implement requirements I18N-SOS-01..09 in docs/TECHNICAL_SPECIFICATION.md when coding is authorized: country-aware phone mask and canonical E.164 storage; emergency number is separate and based on the device's current country/network, not the user's SIM/account code; prepare operator text in the current country's appropriate language, validated in advance with editable local preview. Keep passport/OMS strictly local. Do not claim Android can inject TTS into an emergency call.
