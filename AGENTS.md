@@ -33,3 +33,6 @@ After successful provider login, offer optional fast re-entry with system Androi
 
 ## Multiple devices and one subscription
 Implement user-level billing shared across up to 2–3 linked devices; design configurable max_devices (3 proposed pending final cap). New devices require secure pairing with a newly generated six-digit PIN valid for 3 minutes, displayed on an existing authenticated device, bounded attempts, single use, revocation and safe account recovery. Never treat the PIN alone as authentication. See DEV-01..11 in the technical specification.
+
+## Referral program
+Implement a configurable, versioned per-user referral program as specified in docs/TECHNICAL_SPECIFICATION.md (REF-01..11). Users share personal invite links; the inviter earns 50% off their next paid subscription period only after the invitee's first confirmed payment. No discounts on signup/trial; prevent double-awards, self-referrals, sensitive-data leaks, and unauthorized discount stacking. Terms not yet settled must be flagged for approval, not silently invented.
