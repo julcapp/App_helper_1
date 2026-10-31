@@ -81,3 +81,6 @@ See VOICE-01..14 and BILL-INT-08..09 in docs/TECHNICAL_SPECIFICATION.md. Preserv
 
 ## Foreign payment candidates and crypto restrictions
 Foreign USD 19.90 subscription: CloudPayments and Robokassa are candidate providers, not yet selected or enabled. Owner requests future USDT/BTC acceptance; treat as feasibility/legal review only, never enable or promise cryptocurrency subscription payments until lawful merchant/jurisdiction/store rules are established. See PAY-FOREIGN-01..06 in docs/TECHNICAL_SPECIFICATION.md. Recurring payments require opt-in and server-verified status.
+
+## Approved opt-in memory behavior
+Long-term personal AI memory is OFF by default, enabled only through user choice during onboarding or later. Language, accessibility and map preferences persist independently of AI memory. Users can inspect, correct, delete and disable AI memory; medical SOS passport and OMS fields never sync. See MEM-12..17 in technical specification. Codex remains postponed.
