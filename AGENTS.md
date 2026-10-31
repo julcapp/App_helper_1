@@ -39,3 +39,6 @@ Implement a configurable, versioned per-user referral program as specified in do
 
 ## Notes and product feedback
 Implement the user-facing 'Мои мысли и предложения' module according to FB-01..11 in docs/TECHNICAL_SPECIFICATION.md. 'Мои мысли' is a one-way product feedback channel: a saved written or transcribed note is uploaded to CRM automatically, without a per-note consent checkbox. Clearly inform users before use, do not upload draft keystrokes, use a lawful data-processing basis, and do not implement feedback replies or processing-status messaging. 'Техническая поддержка' is a separate two-way support channel with its own records. Maintain accessibility, privacy, RBAC and human review of AI categorization.
+
+## Updated feedback requirements
+See the newer clarification in docs/TECHNICAL_SPECIFICATION.md: thought drafts and unfinished input are automatically queued for CRM synchronization, and CRM notifies an administrator only after server acknowledgment. Clear prior notice and the legally necessary separate personal-data consent remain prerequisites for rollout. Keep Technical Support separate.
