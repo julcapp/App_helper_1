@@ -2,6 +2,9 @@ package ru.apphelper
 
 import android.Manifest
 import android.app.role.RoleManager
+import android.app.KeyguardManager
+import ru.apphelper.notifications.MessageTextOrigin
+import ru.apphelper.notifications.NotificationReadingPreferences
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
@@ -22,6 +25,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -32,6 +36,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import java.util.Locale
 import kotlin.math.roundToInt
 import ru.apphelper.calls.CallEvent
@@ -42,6 +48,9 @@ import ru.apphelper.contacts.ContactInsertHelper
 import ru.apphelper.data.UserProfileStore
 import ru.apphelper.dialog.VoiceCommand
 import ru.apphelper.dialog.VoiceCommandRouter
+import ru.apphelper.dialog.VoiceEvent
+import ru.apphelper.dialog.VoiceInteractionReducer
+import ru.apphelper.dialog.VoicePhase
 import ru.apphelper.domain.UserProfile
 import ru.apphelper.journal.EventJournal
 import ru.apphelper.journal.JournalEventType
@@ -56,9 +65,14 @@ import ru.apphelper.messages.HttpMessageAnalysisProvider
 import ru.apphelper.messages.MessageAnalysis
 import ru.apphelper.messages.MessageFactCommand
 import ru.apphelper.messages.MessageFactsExtractor
+import ru.apphelper.messages.MessageQueue
+import ru.apphelper.messages.ReplyDraft
+import ru.apphelper.messages.RecipientReview
 import ru.apphelper.notifications.NotificationEvent
 import ru.apphelper.notifications.NotificationEventStore
 import ru.apphelper.profile.ProfileTuningSession
+import ru.apphelper.ui.accessibility.AccessibleAction
+import ru.apphelper.ui.accessibility.AccessibleSection
 import ru.apphelper.ui.onboarding.AppHelperTheme
 import ru.apphelper.ui.onboarding.OnboardingFlow
 import ru.apphelper.voice.AndroidVoiceAssistant
@@ -67,6 +81,8 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        if (savedInstanceState == null) receiveSharedText(intent)
+        val readingPreferences = NotificationReadingPreferences(this)
         val profileStore = UserProfileStore(this)
         val journal = EventJournal(this)
         val unknownCallerStore = UnknownCallerStore(this)
@@ -90,10 +106,13 @@ class MainActivity : ComponentActivity() {
                     )
                 }
                 var voiceError by remember { mutableStateOf<String?>(null) }
-                var latestEvent by remember {
-                    mutableStateOf<NotificationEvent?>(NotificationEventStore.snapshot().firstOrNull())
-                }
+                var voicePhase by remember { mutableStateOf<VoicePhase>(VoicePhase.Idle) }
+                var messageQueue by remember { mutableStateOf(MessageQueue.fromNewestFirst(NotificationEventStore.snapshot())) }
+                var latestEvent by remember { mutableStateOf<NotificationEvent?>(messageQueue.selected) }
                 var currentMessageSession by remember { mutableStateOf<CurrentMessageSession?>(null) }
+                var replyDraft by remember { mutableStateOf<ReplyDraft?>(null) }
+                var awaitingDraftDictation by remember { mutableStateOf(false) }
+                var recipientReview by remember { mutableStateOf<RecipientReview?>(null) }
                 var latestCall by remember { mutableStateOf<CallEvent?>(null) }
                 var pendingUnknownCaller by remember {
                     mutableStateOf<PendingUnknownCaller?>(unknownCallerStore.load())
@@ -109,18 +128,28 @@ class MainActivity : ComponentActivity() {
                 var tuningSession by remember { mutableStateOf<ProfileTuningSession?>(null) }
                 var lastPrompt by remember { mutableStateOf<String?>(null) }
 
+                var readingBatch by remember { mutableStateOf<List<String>>(emptyList()) }
+                var readingGeneration by remember { mutableStateOf(0L) }
+                var slowerReading by remember { mutableStateOf(false) }
+                var knownSources by remember { mutableStateOf(readingPreferences.sources()) }
+                var sourceRevision by remember { mutableStateOf(0) }
                 lateinit var voice: AndroidVoiceAssistant
 
                 fun speak(text: String) {
-                    voice.setSpeechRate(if (profile.speech.slowerSpeech) 0.78f else 1.0f)
+                    voice.setSpeechRate(if (slowerReading || profile.speech.slowerSpeech) 0.78f else 1.0f)
                     voice.speak(text)
                 }
 
                 fun speakAndListen(prompt: String) {
                     lastPrompt = prompt
-                    voice.setSpeechRate(if (profile.speech.slowerSpeech) 0.78f else 1.0f)
+                    voicePhase = VoiceInteractionReducer.reduce(voicePhase, VoiceEvent.Prompt(prompt))
+                    voiceError = null
+                    voice.setSpeechRate(if (slowerReading || profile.speech.slowerSpeech) 0.78f else 1.0f)
                     voice.speak(prompt) {
-                        if (microphoneGranted) voice.startListening()
+                        if (microphoneGranted) {
+                            voicePhase = VoiceInteractionReducer.reduce(voicePhase, VoiceEvent.SpeechFinished)
+                            voice.startListening()
+                        }
                     }
                 }
 
@@ -182,28 +211,113 @@ class MainActivity : ComponentActivity() {
                     speak("Открыта форма нового контакта. Проверьте имя и номер перед сохранением.")
                 }
 
+                fun pauseReading() {
+                    readingGeneration++
+                    readingBatch = emptyList()
+                    voice.stopListening()
+                    voice.stopSpeaking()
+                    voicePhase = VoicePhase.Idle
+                    awaitingNotificationCommand = false
+                    awaitingMessageFollowUp = currentMessageSession != null
+                }
+
                 fun readLatestNotification() {
-                    latestEvent?.let { event ->
-                        awaitingNotificationCommand = false
-                        currentMessageSession = CurrentMessageSession(event)
-                        awaitingMessageFollowUp = true
-                        val spoken = if (event.text.isBlank()) {
-                            "В уведомлении нет доступного текста."
-                        } else {
-                            val sender = event.sender.ifBlank { event.appName }
-                            "$sender. ${event.text}"
+                    val event = latestEvent ?: run { speak("Нет выбранного сообщения."); return }
+                    if (getSystemService(KeyguardManager::class.java)?.isDeviceLocked == true) {
+                        pauseReading()
+                        return
+                    }
+                    readingGeneration++
+                    val generation = readingGeneration
+                    awaitingNotificationCommand = false
+                    awaitingMessageFollowUp = true
+                    currentMessageSession = CurrentMessageSession(event)
+                    replyDraft = null
+                    recipientReview = null
+                    awaitingDraftDictation = false
+                    voice.stopListening()
+                    voicePhase = VoicePhase.Idle
+                    val spoken = if (event.text.isBlank()) {
+                        "В уведомлении нет доступного текста. Откройте исходное приложение."
+                    } else if (event.textOrigin == MessageTextOrigin.SHARED_TEXT) {
+                        "Переданный вами текст. ${event.text}"
+                    } else {
+                        "${event.appName}. Отправитель в уведомлении: ${event.sender}. " +
+                            "Доступный текст уведомления; он может быть неполным. ${event.text}"
+                    }
+                    voice.setSpeechRate(if (slowerReading || profile.speech.slowerSpeech) 0.78f else 1.0f)
+                    voice.speak(spoken) {
+                        if (generation == readingGeneration) {
+                            NotificationEventStore.markRead(event)
+                            messageQueue = messageQueue.markRead(event)
+                            val batch = readingBatch
+                            if (batch.isNotEmpty()) {
+                                readingBatch = batch.drop(1)
+                                // Newer same-key text stays pending rather than being lost on completion.
+                                if (messageQueue.pending.firstOrNull { it.id == event.id } == event) {
+                                    messageQueue = messageQueue.dismiss(event.id)
+                                }
+                                val nextId = readingBatch.firstOrNull { id -> messageQueue.pending.any { it.id == id } }
+                                if (nextId != null) {
+                                    readingBatch = readingBatch.dropWhile { it != nextId }
+                                    messageQueue = messageQueue.select(nextId)
+                                    latestEvent = messageQueue.selected
+                                    readLatestNotification()
+                                } else {
+                                    readingBatch = emptyList()
+                                    speakAndListen("Чтение выбранной очереди завершено. Слушаю следующую команду.")
+                                }
+                            } else {
+                                speakAndListen("Текст озвучен. Можно сказать: повтори, кто написал, следующее, позже или объясни.")
+                            }
                         }
-                        speakAndListen(
-                            "$spoken. Можете сказать: повтори, объясни, скажи проще, что главное, что от меня хотят, есть ли дата, время, телефон, сумма или ссылка.",
-                        )
                     }
                 }
 
+                fun readInbox(all: Boolean) {
+                    pauseReading()
+                    if (all) messageQueue = messageQueue.restoreDeferred()
+                    val items = messageQueue.unread.filter { all || it.id !in messageQueue.deferredIds }
+                    if (items.isEmpty()) { speak("Доступных входящих сообщений нет."); return }
+                    readingBatch = if (all) items.map { it.id } else emptyList()
+                    messageQueue = messageQueue.select(items.first().id)
+                    latestEvent = messageQueue.selected
+                    readLatestNotification()
+                }
+
+                fun deferCurrentMessage() {
+                    pauseReading()
+                    val postponed = currentMessageSession?.event ?: latestEvent
+                    if (postponed != null && messageQueue.pending.none { it.id == postponed.id }) {
+                        messageQueue = messageQueue.receive(postponed)
+                    }
+                    messageQueue = messageQueue.defer(postponed?.id)
+                    currentMessageSession = null
+                    replyDraft = null
+                    recipientReview = null
+                    awaitingDraftDictation = false
+                    awaitingMessageFollowUp = false
+                    latestEvent = messageQueue.selected
+                    speak("Сообщение отложено. Оно сохранено в очереди этого сеанса.")
+                }
+
                 fun closeCurrentMessage() {
+                    pauseReading()
+                    val completed = currentMessageSession?.event ?: latestEvent
+                    if (completed != null) {
+                        NotificationEventStore.markRead(completed)
+                        messageQueue = messageQueue.dismissSnapshot(completed)
+                    }
                     awaitingMessageFollowUp = false
                     currentMessageSession = null
-                    latestEvent = null
-                    speak("Хорошо. Закрываю это сообщение.")
+                    replyDraft = null
+                    recipientReview = null
+                    awaitingDraftDictation = false
+                    latestEvent = messageQueue.selected
+                    val next = latestEvent
+                    if (next != null) {
+                        speak("Следующее сообщение выбрано. Нажмите «Прочитать» или скажите «прочитай».")
+                    } else speak("Сообщение закрыто.")
                 }
 
                 fun answerMessageFact(command: MessageFactCommand) {
@@ -241,17 +355,23 @@ class MainActivity : ComponentActivity() {
                         speak("Сейчас нет сообщения с доступным текстом.")
                         return
                     }
+                    pauseReading()
+                    val generation = readingGeneration
                     awaitingMessageFollowUp = false
                     speak("Анализирую сообщение.")
                     messageAnalysisProvider.analyze(
                         originalText = session.originalText,
                         onSuccess = { analysis ->
-                            awaitingMessageFollowUp = true
-                            speakAndListen(formatAnalysis(command, analysis))
+                            if (generation == readingGeneration && currentMessageSession?.event?.id == session.event.id) {
+                                awaitingMessageFollowUp = true
+                                speakAndListen(formatAnalysis(command, analysis))
+                            }
                         },
                         onError = { error ->
-                            awaitingMessageFollowUp = true
-                            speakAndListen(error)
+                            if (generation == readingGeneration && currentMessageSession?.event?.id == session.event.id) {
+                                awaitingMessageFollowUp = true
+                                speakAndListen(error)
+                            }
                         },
                     )
                 }
@@ -267,28 +387,12 @@ class MainActivity : ComponentActivity() {
                 }
 
                 fun speakMissedEvents() {
-                    val events = journal.unread(limit = 10)
-                    if (events.isEmpty()) {
-                        speak("Новых пропущенных событий нет.")
-                        return
-                    }
-                    val notifications = events.count { it.type == JournalEventType.NOTIFICATION }
-                    val calls = events.count { it.type == JournalEventType.CALL }
-                    val parts = mutableListOf<String>()
-                    if (calls > 0) parts += "$calls звонков"
-                    if (notifications > 0) parts += "$notifications сообщений и уведомлений"
-                    val details = events.take(5).joinToString(". ") { event ->
-                        when (event.type) {
-                            JournalEventType.CALL -> "Звонок от ${event.title}"
-                            JournalEventType.NOTIFICATION -> if (event.body.isBlank()) {
-                                "Сообщение от ${event.title} в ${event.source}"
-                            } else {
-                                "${event.source}, ${event.title}: ${event.body}"
-                            }
-                        }
-                    }
-                    speak("Вы пропустили ${parts.joinToString(" и ")}. $details")
-                    journal.markReviewed(events.map { it.id })
+                    pauseReading()
+                    val groups = messageQueue.unread.groupingBy { it.appName }.eachCount()
+                    if (groups.isEmpty()) speak("Доступных входящих сообщений нет.")
+                    else speak("В очереди этого сеанса ${messageQueue.unread.size} неозвученных сообщений. " +
+                        groups.entries.joinToString(". ") { "${it.key}: ${it.value}" } +
+                        ". Можно сказать: прочитай новые сообщения или читай всё по очереди.")
                 }
 
                 fun tellWhereAmI() {
@@ -337,6 +441,19 @@ class MainActivity : ComponentActivity() {
                 }
 
                 fun handleRecognized(recognized: String) {
+                    // Ignore callbacks after cancellation or once an utterance has already been processed.
+                    if (voicePhase !is VoicePhase.AwaitingSpeech) return
+                    voicePhase = VoiceInteractionReducer.reduce(voicePhase, VoiceEvent.Recognized(recognized))
+                    voiceError = null
+                    if (awaitingDraftDictation) {
+                        awaitingDraftDictation = false
+                        val draft = replyDraft
+                        if (draft != null && currentMessageSession?.event?.id == draft.sourceNotificationId) {
+                            replyDraft = draft.edit(recognized.trim())
+                            speak("Текст записан в черновик. Проверьте его перед дальнейшими действиями.")
+                        }
+                        return
+                    }
                     if (awaitingContactName) {
                         val name = recognized.trim()
                         if (name.isBlank()) askContactName() else openContactForm(name)
@@ -344,6 +461,38 @@ class MainActivity : ComponentActivity() {
                     }
 
                     val command = VoiceCommandRouter.parse(recognized)
+                    // Dictation is handled above. Reading controls never execute message contents.
+                    if (tuningSession == null && !awaitingUnknownCallerConfirmation) {
+                        when (command) {
+                            VoiceCommand.READ_ALL -> { readInbox(true); return }
+                            VoiceCommand.READ_NEW -> { readInbox(false); return }
+                            VoiceCommand.PAUSE -> { pauseReading(); return }
+                            VoiceCommand.NEXT -> {
+                                deferCurrentMessage()
+                                if (latestEvent != null) readLatestNotification()
+                                return
+                            }
+                            VoiceCommand.SENDER -> {
+                                val event = currentMessageSession?.event ?: latestEvent
+                                pauseReading()
+                                speak(event?.let { "Источник: ${it.appName}. Отправитель в уведомлении: ${it.sender}." }
+                                    ?: "Нет выбранного сообщения.")
+                                return
+                            }
+                            VoiceCommand.SLOWER -> {
+                                pauseReading()
+                                slowerReading = true
+                                if (currentMessageSession != null) {
+                                    latestEvent = currentMessageSession?.event
+                                    readLatestNotification()
+                                } else speak("Буду читать медленнее.")
+                                return
+                            }
+                            VoiceCommand.MISSED -> { speakMissedEvents(); return }
+                            else -> Unit
+                        }
+                    }
+
 
                     tuningSession?.let { current ->
                         when (command) {
@@ -383,9 +532,7 @@ class MainActivity : ComponentActivity() {
                         when (command) {
                             VoiceCommand.READ -> readLatestNotification()
                             VoiceCommand.LATER -> {
-                                awaitingNotificationCommand = false
-                                latestEvent = null
-                                speak("Хорошо. Оставлю на потом.")
+                                deferCurrentMessage()
                             }
                             VoiceCommand.REPEAT -> lastPrompt?.let(::speakAndListenNotification)
                             else -> speakAndListenNotification("Не понял ответ. Скажите: прочитай, позже или повтори.")
@@ -406,8 +553,8 @@ class MainActivity : ComponentActivity() {
                             VoiceCommand.SIMPLIFY_MESSAGE,
                             VoiceCommand.MESSAGE_MAIN_POINT,
                             VoiceCommand.MESSAGE_REQUEST -> analyzeCurrentMessage(command)
-                            VoiceCommand.CLOSE_MESSAGE,
-                            VoiceCommand.LATER -> closeCurrentMessage()
+                            VoiceCommand.CLOSE_MESSAGE -> closeCurrentMessage()
+                            VoiceCommand.LATER -> deferCurrentMessage()
                             else -> speakAndListen(
                                 "Я работаю с текущим сообщением. Скажите: повтори, объясни, скажи проще, что главное, что от меня хотят, есть ли дата, время, телефон, сумма, ссылка или закрой сообщение.",
                             )
@@ -423,6 +570,8 @@ class MainActivity : ComponentActivity() {
                             VoiceCommand.GO_HOME -> navigateHome()
                             VoiceCommand.SAVE_HOME -> saveCurrentAsHome()
                             VoiceCommand.TUNE_TO_ME -> startProfileTuning()
+                            VoiceCommand.READ -> readLatestNotification()
+                            VoiceCommand.LATER -> deferCurrentMessage()
                             VoiceCommand.REPEAT -> lastPrompt?.let(::speak)
                             else -> speak(
                                 "Я понимаю команды: что я пропустил, где я, запомни дом, отведи меня домой и настройся под меня.",
@@ -437,27 +586,34 @@ class MainActivity : ComponentActivity() {
                         onRecognized = ::handleRecognized,
                         onError = { error ->
                             voiceError = error
-                            awaitingNotificationCommand = false
-                            awaitingMessageFollowUp = false
-                            awaitingUnknownCallerConfirmation = false
-                            awaitingContactName = false
-                            listeningForGeneralCommand = false
+                            voicePhase = VoiceInteractionReducer.reduce(
+                                voicePhase, VoiceEvent.RecognitionFailed(error),
+                            )
+                            // Keep message/session state for retry rather than discarding context.
                         },
                     )
                 }
 
                 DisposableEffect(Unit) {
+                    val lifecycleObserver = LifecycleEventObserver { _, event ->
+                        if (event == Lifecycle.Event.ON_STOP) pauseReading()
+                    }
+                    lifecycle.addObserver(lifecycleObserver)
                     val notificationListener: (NotificationEvent) -> Unit = { event ->
-                        latestEvent = event
-                        currentMessageSession = null
-                        awaitingMessageFollowUp = false
-                        val sender = event.sender.ifBlank { event.appName }
-                        val prompt = "Новое сообщение в ${event.appName} от $sender. Прочитать?"
-                        if (microphoneGranted) speakAndListenNotification(prompt) else speak(prompt)
+                        messageQueue = messageQueue.receive(event)
+                        knownSources = readingPreferences.sources()
+                        if (currentMessageSession == null) latestEvent = messageQueue.selected
+                        // Incoming content does not start TTS or interrupt the user's current action.
                     }
                     val callListener: (CallEvent) -> Unit = { event ->
                         latestCall = event
                         if (event.incoming) {
+                            readingGeneration++
+                            readingBatch = emptyList()
+                            awaitingDraftDictation = false
+                            voice.stopListening()
+                            voice.stopSpeaking()
+                            voicePhase = VoiceInteractionReducer.reduce(voicePhase, VoiceEvent.Cancel)
                             if (event.displayName == null && event.phoneNumber.isNotBlank()) {
                                 pendingUnknownCaller = PendingUnknownCaller(
                                     phoneNumber = event.phoneNumber,
@@ -467,12 +623,13 @@ class MainActivity : ComponentActivity() {
                             val spokenCaller = event.displayName
                                 ?: event.phoneNumber.takeIf { it.isNotBlank() }
                                 ?: "неизвестный номер"
-                            speak("Входящий звонок. $spokenCaller.")
+                            lastPrompt = "Входящий звонок. $spokenCaller."
                         }
                     }
                     NotificationEventStore.addListener(notificationListener)
                     CallEventStore.addListener(callListener)
                     onDispose {
+                        lifecycle.removeObserver(lifecycleObserver)
                         NotificationEventStore.removeListener(notificationListener)
                         CallEventStore.removeListener(callListener)
                         voice.release()
@@ -561,13 +718,62 @@ class MainActivity : ComponentActivity() {
                                     speak("Определитель звонков требует Android 10 или новее.")
                                 }
                             },
-                            onReadNotification = { readLatestNotification() },
-                            onLater = {
-                                awaitingNotificationCommand = false
-                                awaitingMessageFollowUp = false
-                                currentMessageSession = null
-                                latestEvent = null
+                            inbox = messageQueue,
+                            knownSources = knownSources,
+                            sourceRevision = sourceRevision,
+                            isSourceEnabled = { readingPreferences.isEnabled(it) },
+                            onToggleSource = { source ->
+                                val enabled = !readingPreferences.isEnabled(source)
+                                readingPreferences.setEnabled(source, enabled)
+                                sourceRevision++
+                                if (!enabled) {
+                                    pauseReading()
+                                    NotificationEventStore.removePackage(source)
+                                    messageQueue = messageQueue.withoutPackage(source)
+                                    if (currentMessageSession?.event?.packageName == source) {
+                                        currentMessageSession = null
+                                        replyDraft = null
+                                        recipientReview = null
+                                    }
+                                    latestEvent = messageQueue.selected
+                                }
                             },
+                            onReadAll = { readInbox(true) },
+                            onReadNew = { readInbox(false) },
+                            onPauseReading = { pauseReading() },
+                            onNextMessage = { deferCurrentMessage(); if (latestEvent != null) readLatestNotification() },
+                            onReadScreenSettings = { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) },
+                            currentMessage = currentMessageSession,
+                            replyDraft = replyDraft,
+                            recipientReview = recipientReview,
+                            onConfirmRecipientDisplay = { recipientReview = recipientReview?.confirmDisplay() },
+                            onStartDraft = {
+                                currentMessageSession?.let { session ->
+                                    replyDraft = ReplyDraft(session.event.id, session.source, session.sender)
+                                    recipientReview = RecipientReview(session.event.id, session.source, session.sender)
+                                }
+                            },
+                            onDraftTextChange = { value -> replyDraft = replyDraft?.edit(value) },
+                            onDictateDraft = {
+                                if (!microphoneGranted) microphoneLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                else if (replyDraft != null) {
+                                    awaitingDraftDictation = true
+                                    speakAndListen("Продиктуйте полный текст ответа. Предыдущий текст будет заменён.")
+                                }
+                            },
+                            onReviewDraft = {
+                                replyDraft = replyDraft?.markReviewed()
+                                replyDraft?.takeIf { it.reviewed }?.let {
+                                    speak("Черновик для ${it.displayedSender}. Текст: ${it.text}. Это только черновик, отправка недоступна.")
+                                }
+                            },
+                            onDiscardDraft = { replyDraft = null; recipientReview = null; awaitingDraftDictation = false },
+                            onReadNotification = { readLatestNotification() },
+                            onRepeatMessage = { repeatCurrentMessage() },
+                            onExplainMessage = { analyzeCurrentMessage(VoiceCommand.EXPLAIN_MESSAGE) },
+                            onMainPoint = { analyzeCurrentMessage(VoiceCommand.MESSAGE_MAIN_POINT) },
+                            onCloseMessage = { closeCurrentMessage() },
+                            onLater = { deferCurrentMessage() },
                             onMissed = { speakMissedEvents() },
                             onWhereAmI = { tellWhereAmI() },
                             onSaveHome = { saveCurrentAsHome() },
@@ -584,19 +790,49 @@ class MainActivity : ComponentActivity() {
                                 else microphoneLauncher.launch(Manifest.permission.RECORD_AUDIO)
                             },
                             onListen = {
-                                if (!microphoneGranted) {
+                                readingGeneration++
+                                readingBatch = emptyList()
+                                voice.stopSpeaking()
+                                val recoverable = voicePhase as? VoicePhase.RecoverableError
+                                if (recoverable != null && microphoneGranted) {
+                                    voicePhase = VoiceInteractionReducer.reduce(voicePhase, VoiceEvent.Retry)
+                                    speakAndListen(recoverable.prompt)
+                                } else if (!microphoneGranted) {
                                     microphoneLauncher.launch(Manifest.permission.RECORD_AUDIO)
                                 } else if (pendingUnknownCaller != null) {
                                     askAboutUnknownCaller()
                                 } else if (awaitingMessageFollowUp && currentMessageSession != null) {
-                                    lastPrompt = "Слушаю команду по сообщению."
-                                    voice.speak("Слушаю команду по сообщению.") { voice.startListening() }
+                                    speakAndListen("Слушаю команду по сообщению.")
                                 } else {
                                     listeningForGeneralCommand = true
-                                    lastPrompt = "Слушаю."
-                                    voice.setSpeechRate(if (profile.speech.slowerSpeech) 0.78f else 1.0f)
-                                    voice.speak("Слушаю.") { voice.startListening() }
+                                    speakAndListen("Слушаю.")
                                 }
+                            },
+                            onRepeat = {
+                                if (microphoneGranted && !lastPrompt.isNullOrBlank()) {
+                                    voice.stopListening()
+                                    speakAndListen(lastPrompt!!)
+                                } else if (!microphoneGranted) {
+                                    microphoneLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                } else {
+                                    speak("Пока нечего повторять.")
+                                }
+                            },
+                            onCancelVoice = {
+                                readingGeneration++
+                                readingBatch = emptyList()
+                                voice.stopListening()
+                                voice.stopSpeaking()
+                                voicePhase = VoiceInteractionReducer.reduce(voicePhase, VoiceEvent.Cancel)
+                                voiceError = null
+                                awaitingNotificationCommand = false
+                                awaitingMessageFollowUp = false
+                                awaitingUnknownCallerConfirmation = false
+                                awaitingContactName = false
+                                listeningForGeneralCommand = false
+                                tuningSession = null
+                                awaitingDraftDictation = false
+                                speak("Действие отменено.")
                             },
                             onSpeak = {
                                 val greeting = if (profile.displayName.isBlank()) {
@@ -613,6 +849,25 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        receiveSharedText(intent)
+    }
+
+    private fun receiveSharedText(input: Intent?) {
+        val text = when (input?.action) {
+            Intent.ACTION_SEND -> input.getCharSequenceExtra(Intent.EXTRA_TEXT)
+            Intent.ACTION_PROCESS_TEXT -> input.getCharSequenceExtra(Intent.EXTRA_PROCESS_TEXT)
+            else -> null
+        }?.toString()?.trim()?.take(12000).orEmpty()
+        if (text.isEmpty()) return
+        NotificationEventStore.add(NotificationEvent(
+            id = "shared:${java.util.UUID.randomUUID()}", packageName = packageName,
+            appName = "Переданный текст", sender = "Выбранный вами фрагмент",
+            text = text, receivedAt = System.currentTimeMillis(), textOrigin = MessageTextOrigin.SHARED_TEXT,
+        ))
+    }
+
     private fun hasPermission(permission: String): Boolean =
         ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED
 }
@@ -620,7 +875,26 @@ class MainActivity : ComponentActivity() {
 @androidx.compose.runtime.Composable
 private fun HomeScreen(
     profile: UserProfile,
+    inbox: MessageQueue,
+    knownSources: Map<String, String>,
+    sourceRevision: Int,
+    isSourceEnabled: (String) -> Boolean,
+    onToggleSource: (String) -> Unit,
+    onReadAll: () -> Unit,
+    onReadNew: () -> Unit,
+    onPauseReading: () -> Unit,
+    onNextMessage: () -> Unit,
+    onReadScreenSettings: () -> Unit,
     latestEvent: NotificationEvent?,
+    currentMessage: CurrentMessageSession?,
+    replyDraft: ReplyDraft?,
+    recipientReview: RecipientReview?,
+    onConfirmRecipientDisplay: () -> Unit,
+    onStartDraft: () -> Unit,
+    onDraftTextChange: (String) -> Unit,
+    onDictateDraft: () -> Unit,
+    onReviewDraft: () -> Unit,
+    onDiscardDraft: () -> Unit,
     latestCall: CallEvent?,
     pendingUnknownCaller: PendingUnknownCaller?,
     safeHome: SafeLocation?,
@@ -634,6 +908,10 @@ private fun HomeScreen(
     onRequestLocation: () -> Unit,
     onRequestCallScreeningRole: () -> Unit,
     onReadNotification: () -> Unit,
+    onRepeatMessage: () -> Unit,
+    onExplainMessage: () -> Unit,
+    onMainPoint: () -> Unit,
+    onCloseMessage: () -> Unit,
     onLater: () -> Unit,
     onMissed: () -> Unit,
     onWhereAmI: () -> Unit,
@@ -642,92 +920,170 @@ private fun HomeScreen(
     onTuneToMe: () -> Unit,
     onSaveUnknown: () -> Unit,
     onListen: () -> Unit,
+    onRepeat: () -> Unit,
+    onCancelVoice: () -> Unit,
     onSpeak: () -> Unit,
 ) {
+    var showTools by remember { mutableStateOf(false) }
+
     Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(24.dp),
-        verticalArrangement = Arrangement.spacedBy(18.dp),
+        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        Text("Помощник готов", fontSize = 30.sp)
-        Text("Профиль ${profile.displayName.ifBlank { "пользователя" }} активен.", fontSize = 20.sp)
+        AccessibleSection(
+            title = "Мой помощник",
+            description = "Нажмите «Говорить» или выберите действие ниже.",
+        )
 
-        Button(onClick = onListen, modifier = Modifier.fillMaxWidth().height(72.dp)) {
-            Text("Слушаю", fontSize = 22.sp)
-        }
-        Button(onClick = onTuneToMe, modifier = Modifier.fillMaxWidth().height(64.dp)) {
-            Text(if (tuningActive) "Настройка идёт…" else "Настройся под меня", fontSize = 20.sp)
-        }
-        Button(onClick = onMissed, modifier = Modifier.fillMaxWidth().height(64.dp)) {
-            Text("Что я пропустил?", fontSize = 20.sp)
+        // Primary action is always visible before technical or optional functionality.
+        AccessibleAction(
+            label = "Говорить",
+            accessibilityLabel = "Говорить с помощником. Двойное нажатие для начала.",
+            onClick = onListen,
+            primary = true,
+        )
+
+        AccessibleAction(label = "Повторить вопрос", onClick = onRepeat)
+        AccessibleAction(label = "Отмена", onClick = onCancelVoice)
+
+        AccessibleSection(
+            title = "Входящие и чтение",
+            description = "Не озвучено: ${inbox.unread.size}. Отложено: ${inbox.deferredIds.size}. " +
+                "Уведомления могут содержать только часть сообщения. Прочтение здесь не меняет статус в мессенджере.",
+        )
+        AccessibleAction(label = "Прочитать входящие", onClick = onReadNew)
+        AccessibleAction(label = "Читать всё по очереди", onClick = onReadAll)
+        AccessibleAction(label = "Пауза чтения", onClick = onPauseReading)
+        if (inbox.pending.isNotEmpty()) AccessibleAction(label = "Следующее сообщение", onClick = onNextMessage)
+
+        if (currentMessage != null) {
+            AccessibleSection(
+                title = "Работа с сообщением",
+                description = "От: ${currentMessage.sender}. Источник: ${currentMessage.source}.",
+            )
+            AccessibleSection(
+                title = "Возможность быстрого ответа",
+                description = if (currentMessage.event.quickReplyAvailable) {
+                    "В уведомлении обнаружено действие ответа. Отправка пока отключена."
+                } else {
+                    "В этом уведомлении быстрый ответ не обнаружен."
+                },
+            )
+            Text("Доступный исходный текст: ${currentMessage.originalText.ifBlank { "Текст не передан источником" }}")
+            AccessibleAction(label = "Прочитать ещё раз", onClick = onRepeatMessage)
+            AccessibleAction(label = "Объяснить простыми словами", onClick = onExplainMessage)
+            AccessibleAction(label = "Что главное?", onClick = onMainPoint)
+            if (replyDraft == null) {
+                AccessibleAction(label = "Подготовить ответ", onClick = onStartDraft)
+            } else {
+                AccessibleSection(
+                    title = "Черновик ответа",
+                    description = "Получатель не подтверждён: ${replyDraft.displayedSender}. Отправка пока недоступна.",
+                )
+                if (recipientReview != null && !recipientReview.confirmedForDisplay) {
+                    AccessibleAction(label = "Отображаемое имя проверено, адрес ещё не установлен", onClick = onConfirmRecipientDisplay)
+                }
+                OutlinedTextField(
+                    value = replyDraft.text,
+                    onValueChange = onDraftTextChange,
+                    label = { Text("Текст ответа") },
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 3,
+                )
+                AccessibleAction(label = "Продиктовать текст заново", onClick = onDictateDraft)
+                if (replyDraft.canReview) {
+                    AccessibleAction(label = "Прочитать черновик", onClick = onReviewDraft)
+                }
+                AccessibleAction(label = "Отменить черновик", onClick = onDiscardDraft)
+            }
+            AccessibleAction(label = "Закрыть сообщение", onClick = onCloseMessage)
+        } else if (latestEvent != null) {
+            AccessibleSection(
+                title = "Новое сообщение",
+                description = "Источник: ${latestEvent.appName}. Отправитель: ${latestEvent.sender}.",
+            )
+            AccessibleAction(
+                label = "Прочитать вслух",
+                accessibilityLabel = "Прочитать доступный текст нового уведомления вслух",
+                onClick = onReadNotification,
+            )
+            AccessibleAction(label = "Позже", onClick = onLater)
         }
 
-        if (!locationGranted) {
-            Button(onClick = onRequestLocation, modifier = Modifier.fillMaxWidth().height(64.dp)) {
-                Text("Разрешить геолокацию", fontSize = 18.sp)
-            }
-        } else {
-            Button(onClick = onWhereAmI, modifier = Modifier.fillMaxWidth().height(64.dp)) {
-                Text("Где я?", fontSize = 20.sp)
-            }
-            Button(onClick = onSaveHome, modifier = Modifier.fillMaxWidth().height(64.dp)) {
-                Text(if (safeHome == null) "Запомнить это место как дом" else "Обновить точку Дом", fontSize = 18.sp)
-            }
+        AccessibleAction(label = "Что я пропустил?", onClick = onMissed)
+
+        if (voiceError != null) {
+            AccessibleSection(title = "Голосовая функция недоступна", description = voiceError)
+            AccessibleAction(label = "Попробовать снова", onClick = onListen)
         }
-        if (safeHome != null) {
-            Button(onClick = onNavigateHome, modifier = Modifier.fillMaxWidth().height(64.dp)) {
-                Text("Отведи меня домой", fontSize = 20.sp)
-            }
+
+        if (pendingUnknownCaller != null) {
+            AccessibleSection(
+                title = "Неизвестный номер",
+                description = pendingUnknownCaller.phoneNumber,
+            )
+            AccessibleAction(label = "Сохранить контакт", onClick = onSaveUnknown)
         }
-        lastKnownLocation?.let { location ->
-            Text(
-                "Последняя позиция: ${String.format(Locale.US, "%.5f", location.latitude)}, " +
-                    String.format(Locale.US, "%.5f", location.longitude),
-                fontSize = 16.sp,
+
+        if (latestCall != null) {
+            AccessibleSection(
+                title = "Последний звонок",
+                description = latestCall.displayName
+                    ?: latestCall.phoneNumber.ifBlank { "Неизвестный номер" },
             )
         }
 
-        pendingUnknownCaller?.let { caller ->
-            Text("Неизвестный номер", fontSize = 24.sp)
-            Text(caller.phoneNumber, fontSize = 20.sp)
-            Button(onClick = onSaveUnknown, modifier = Modifier.fillMaxWidth().height(64.dp)) {
-                Text("Сохранить в контакты", fontSize = 20.sp)
-            }
-        }
+        AccessibleAction(
+            label = if (showTools) "Скрыть дополнительные функции" else "Помощь и дополнительные функции",
+            onClick = { showTools = !showTools },
+        )
 
-        Button(onClick = onEnableNotificationAccess, modifier = Modifier.fillMaxWidth().height(64.dp)) {
-            Text("Разрешить доступ к уведомлениям", fontSize = 18.sp)
-        }
-        if (!contactsGranted) {
-            Button(onClick = onRequestContacts, modifier = Modifier.fillMaxWidth().height(64.dp)) {
-                Text("Разрешить доступ к контактам", fontSize = 18.sp)
+        if (showTools) {
+            AccessibleSection(
+                title = "Дополнительные функции",
+                description = "Выберите только то, что вам нужно. Разрешения можно настроить позже.",
+            )
+            AccessibleAction(
+                label = if (tuningActive) "Идёт настройка" else "Настроить помощника под меня",
+                onClick = onTuneToMe,
+            )
+            if (!locationGranted) {
+                AccessibleAction(label = "Включить определение местоположения", onClick = onRequestLocation)
+            } else {
+                AccessibleAction(label = "Где я?", onClick = onWhereAmI)
+                AccessibleAction(
+                    label = if (safeHome == null) "Запомнить место как дом" else "Обновить место «Дом»",
+                    onClick = onSaveHome,
+                )
+            }
+            if (safeHome != null) AccessibleAction(label = "Показать дорогу домой", onClick = onNavigateHome)
+            AccessibleAction(label = "Настроить чтение уведомлений", onClick = onEnableNotificationAccess)
+            AccessibleSection(title = "Источники входящих",
+                description = "Список пополняется при получении уведомлений. Отключение удаляет сообщения этого приложения из очереди.")
+            androidx.compose.runtime.key(sourceRevision) {
+                knownSources.forEach { (source, label) ->
+                    val enabled = isSourceEnabled(source)
+                    AccessibleAction(label = "$label: ${if (enabled) "включено — отключить" else "выключено — включить"}",
+                        onClick = { onToggleSource(source) })
+                }
+            }
+            AccessibleSection(title = "Чтение страницы или экрана",
+                description = "Выделите текст в браузере и выберите «Голосовой помощник» или используйте «Поделиться». " +
+                    "Для чтения открытого окна включите службу «Чтение открытого экрана» и назначьте ей кнопку специальных возможностей. " +
+                    "Читается только доступный текст, без скрытой истории и распознавания изображений.")
+            AccessibleAction(label = "Настроить чтение открытого экрана", onClick = onReadScreenSettings)
+            if (!contactsGranted) AccessibleAction(label = "Разрешить доступ к контактам", onClick = onRequestContacts)
+            AccessibleAction(label = "Настроить определитель звонков", onClick = onRequestCallScreeningRole)
+            AccessibleAction(label = "Проверить голос помощника", onClick = onSpeak)
+            // Coordinates are diagnostic data, not the primary answer to "Where am I?".
+            if (lastKnownLocation != null) {
+                Text(
+                    "Последние координаты: " +
+                        String.format(Locale.US, "%.5f", lastKnownLocation.latitude) + ", " +
+                        String.format(Locale.US, "%.5f", lastKnownLocation.longitude),
+                    style = androidx.compose.material3.MaterialTheme.typography.bodyMedium,
+                )
             }
         }
-        Button(onClick = onRequestCallScreeningRole, modifier = Modifier.fillMaxWidth().height(64.dp)) {
-            Text("Включить определитель звонков", fontSize = 18.sp)
-        }
-
-        latestCall?.let { call ->
-            Text("Последний звонок", fontSize = 24.sp)
-            Text(call.displayName ?: call.phoneNumber.ifBlank { "Неизвестный номер" }, fontSize = 20.sp)
-        }
-        latestEvent?.let { event ->
-            Text("Новое уведомление", fontSize = 24.sp)
-            Text("${event.appName}: ${event.sender}", fontSize = 20.sp)
-            if (event.text.isNotBlank()) Text(event.text, fontSize = 18.sp)
-            Button(onClick = onReadNotification, modifier = Modifier.fillMaxWidth().height(64.dp)) {
-                Text("Прочитать", fontSize = 20.sp)
-            }
-            Button(onClick = onLater, modifier = Modifier.fillMaxWidth().height(64.dp)) {
-                Text("Позже", fontSize = 20.sp)
-            }
-        }
-
-        Button(onClick = onSpeak, modifier = Modifier.fillMaxWidth().height(60.dp)) {
-            Text("Проверить голос", fontSize = 20.sp)
-        }
-        voiceError?.let { Text(it) }
     }
 }

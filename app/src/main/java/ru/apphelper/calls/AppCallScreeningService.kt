@@ -2,6 +2,7 @@ package ru.apphelper.calls
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.os.Build
 import android.telecom.Call
 import android.telecom.CallScreeningService
 import androidx.core.content.ContextCompat
@@ -11,7 +12,10 @@ import ru.apphelper.journal.EventJournal
 class AppCallScreeningService : CallScreeningService() {
     override fun onScreenCall(callDetails: Call.Details) {
         val number = callDetails.handle?.schemeSpecificPart.orEmpty()
-        val isIncoming = callDetails.callDirection == Call.Details.DIRECTION_INCOMING
+        // Before Android 10 this callback is used for incoming calls only.
+        val isIncoming = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            callDetails.callDirection == Call.Details.DIRECTION_INCOMING
+        } else true
 
         val displayName = if (
             number.isNotBlank() &&
@@ -41,7 +45,6 @@ class AppCallScreeningService : CallScreeningService() {
                 CallResponse.Builder()
                     .setDisallowCall(false)
                     .setRejectCall(false)
-                    .setSilenceCall(false)
                     .setSkipCallLog(false)
                     .setSkipNotification(false)
                     .build(),
