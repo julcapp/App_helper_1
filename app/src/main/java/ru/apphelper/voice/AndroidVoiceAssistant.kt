@@ -2,6 +2,10 @@ package ru.apphelper.voice
 
 import android.content.Context
 import android.content.Intent
+import android.media.AudioAttributes
+import android.media.AudioFocusRequest
+import android.media.AudioManager
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -20,6 +24,49 @@ class AndroidVoiceAssistant(
 ) : VoiceAssistant, TextToSpeech.OnInitListener {
 
     private val mainHandler = Handler(Looper.getMainLooper())
+    private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    private var interrupted = false
+    private val focusListener = AudioManager.OnAudioFocusChangeListener { change ->
+        if (change == AudioManager.AUDIOFOCUS_LOSS ||
+            change == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT) {
+            interrupted = true
+            stopListening()
+            stopSpeaking()
+        }
+        // Do not automatically restart private speech when focus returns.
+    }
+    private val audioAttributes = AudioAttributes.Builder()
+        .setUsage(AudioAttributes.USAGE_ASSISTANCE_ACCESSIBILITY)
+        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+        .build()
+    private val focusRequest: AudioFocusRequest? =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
+                .setAudioAttributes(audioAttributes)
+                .setOnAudioFocusChangeListener(focusListener)
+                .build()
+        } else null
+
+    private fun requestFocus(): Boolean {
+        val result = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            audioManager.requestAudioFocus(focusRequest!!)
+        } else {
+            @Suppress("DEPRECATION")
+            audioManager.requestAudioFocus(focusListener, AudioManager.STREAM_MUSIC,
+                AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
+        }
+        if (result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED) interrupted = false
+        return result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+    }
+
+    private fun abandonFocus() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            audioManager.abandonAudioFocusRequest(focusRequest!!)
+        } else {
+            @Suppress("DEPRECATION")
+            audioManager.abandonAudioFocus(focusListener)
+        }
+    }
     private val completionCallbacks = mutableMapOf<String, () -> Unit>()
     private val tts = TextToSpeech(context, this)
     private val recognizer: SpeechRecognizer? =
@@ -41,7 +88,8 @@ class AndroidVoiceAssistant(
 
             override fun onDone(utteranceId: String?) {
                 mainHandler.post {
-                    utteranceId?.let { completionCallbacks.remove(it) }?.invoke()
+                    if (!interrupted) utteranceId?.let { completionCallbacks.remove(it) }?.invoke()
+                    else utteranceId?.let { completionCallbacks.remove(it) }
                 }
             }
         })
@@ -79,6 +127,10 @@ class AndroidVoiceAssistant(
     }
 
     override fun speak(text: String, onDone: (() -> Unit)?) {
+        if (!requestFocus()) {
+            onError("Звук занят другим приложением. Попробуйте позже.")
+            return
+        }
         val utteranceId = "app-helper-${UUID.randomUUID()}"
         if (onDone != null) completionCallbacks[utteranceId] = onDone
         tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
@@ -89,6 +141,7 @@ class AndroidVoiceAssistant(
     }
 
     override fun startListening() {
+        if (interrupted) return
         val speechRecognizer = recognizer ?: run {
             onError("Распознавание речи недоступно на этом устройстве")
             return
@@ -113,6 +166,7 @@ class AndroidVoiceAssistant(
     fun stopSpeaking() {
         completionCallbacks.clear()
         tts.stop()
+        abandonFocus()
     }
 
     override fun release() {
@@ -120,5 +174,6 @@ class AndroidVoiceAssistant(
         recognizer?.destroy()
         tts.stop()
         tts.shutdown()
+        abandonFocus()
     }
 }
