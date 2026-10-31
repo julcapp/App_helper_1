@@ -623,6 +623,29 @@ class MainActivity : ComponentActivity() {
                                     voice.speak("Слушаю.") { voice.startListening() }
                                 }
                             },
+                            onRepeat = {
+                                if (microphoneGranted && !lastPrompt.isNullOrBlank()) {
+                                    voice.stopListening()
+                                    speakAndListen(lastPrompt!!)
+                                } else if (!microphoneGranted) {
+                                    microphoneLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                } else {
+                                    speak("Пока нечего повторять.")
+                                }
+                            },
+                            onCancelVoice = {
+                                voice.stopListening()
+                                voice.stopSpeaking()
+                                voicePhase = VoiceInteractionReducer.reduce(voicePhase, VoiceEvent.Cancel)
+                                voiceError = null
+                                awaitingNotificationCommand = false
+                                awaitingMessageFollowUp = false
+                                awaitingUnknownCallerConfirmation = false
+                                awaitingContactName = false
+                                listeningForGeneralCommand = false
+                                tuningSession = null
+                                speak("Действие отменено.")
+                            },
                             onSpeak = {
                                 val greeting = if (profile.displayName.isBlank()) {
                                     "Здравствуйте. Я готов помочь."
@@ -667,6 +690,8 @@ private fun HomeScreen(
     onTuneToMe: () -> Unit,
     onSaveUnknown: () -> Unit,
     onListen: () -> Unit,
+    onRepeat: () -> Unit,
+    onCancelVoice: () -> Unit,
     onSpeak: () -> Unit,
 ) {
     var showTools by remember { mutableStateOf(false) }
@@ -687,6 +712,9 @@ private fun HomeScreen(
             onClick = onListen,
             primary = true,
         )
+
+        AccessibleAction(label = "Повторить вопрос", onClick = onRepeat)
+        AccessibleAction(label = "Отмена", onClick = onCancelVoice)
 
         if (latestEvent != null) {
             AccessibleSection(
