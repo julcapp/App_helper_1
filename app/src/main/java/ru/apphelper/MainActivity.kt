@@ -480,6 +480,9 @@ class MainActivity : ComponentActivity() {
                     val callListener: (CallEvent) -> Unit = { event ->
                         latestCall = event
                         if (event.incoming) {
+                            voice.stopListening()
+                            voice.stopSpeaking()
+                            voicePhase = VoiceInteractionReducer.reduce(voicePhase, VoiceEvent.Cancel)
                             if (event.displayName == null && event.phoneNumber.isNotBlank()) {
                                 pendingUnknownCaller = PendingUnknownCaller(
                                     phoneNumber = event.phoneNumber,
@@ -489,7 +492,7 @@ class MainActivity : ComponentActivity() {
                             val spokenCaller = event.displayName
                                 ?: event.phoneNumber.takeIf { it.isNotBlank() }
                                 ?: "неизвестный номер"
-                            speak("Входящий звонок. $spokenCaller.")
+                            lastPrompt = "Входящий звонок. $spokenCaller."
                         }
                     }
                     NotificationEventStore.addListener(notificationListener)
