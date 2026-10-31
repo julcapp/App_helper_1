@@ -27,3 +27,6 @@ Read `docs/SUBSCRIPTIONS_CRM_REQUIREMENTS.md` for the confirmed **90-day trial c
 
 ## ESIA / Gosuslugi
 Support ESIA (Gosuslugi) as an optional future identity provider only. Integration requires verified eligibility, registration, compliance and credentials. Feature flag OFF until access is approved and tested. Never ask for or store Gosuslugi passwords, SNILS or passport details without an independently approved, necessary purpose. Maintain a non-ESIA authentication path.
+
+## Local biometric sign-in
+After successful provider login, offer optional fast re-entry with system Android BiometricPrompt and appropriate device credential fallback. Use Android Keystore for secured session keys; never access or store biometric templates. Server session validity and subscription status must still be checked. Follow AUTH-BIO-01..06 in docs/TECHNICAL_SPECIFICATION.md.
