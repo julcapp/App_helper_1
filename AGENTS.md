@@ -45,3 +45,6 @@ See the newer clarification in docs/TECHNICAL_SPECIFICATION.md: thought drafts a
 
 ## 2GIS maps and trusted people
 See GEO-01..11 in docs/TECHNICAL_SPECIFICATION.md. Use 2GIS as a map/search/routing/navigation provider candidate; location permissions come from Android, sharing with family uses a separate consent-controlled App_helper_1 server module. Never invent a 2GIS family-tracking API. No hidden location monitoring or CRM access. Support TalkBack, revocation, expiring links and foreground-service requirements.
+
+## User-selectable map providers
+Users choose Google Maps, Yandex Maps or 2GIS. Persist preference per account and allow per-route override. Separate Android location, maps, routing, navigation and trusted-person location sharing. External-app navigation is a valid initial implementation but must be clearly labeled; embedded SDK integration needs licensing/API verification. See MAP-01..09 in docs/TECHNICAL_SPECIFICATION.md.
