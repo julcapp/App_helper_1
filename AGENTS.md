@@ -12,6 +12,9 @@ If unavailable, perform equivalent structured discovery and report the missing i
 Start from prior documented decisions, ask only unresolved, high-impact questions. Distinguish **confirmed decisions**, **hypotheses**, and **open questions**. Do not claim research with actual users until performed.
 Record validated changes in technical specification/roadmap after owner approval; do not silently replace accepted requirements.
 
+## Commercial addendum
+Read `docs/SUBSCRIPTIONS_CRM_REQUIREMENTS.md` for the confirmed 3-month trial, 950 RUB/month subscription, CRM, Sberbank payment, registration and push requirements. Treat its explicit open questions as requiring approval. Do not reuse credentials, database or merchant IDs from other projects. No production payment integration until the merchant, fiscalization, distribution and privacy arrangements are approved.
+
 ## Engineering
 - Active working branch: `ux/discovery-accessibility-2026-10`. Do not push directly to `main`.
 - First milestone: build and test Android app, then stabilize message reading and accessibility.
