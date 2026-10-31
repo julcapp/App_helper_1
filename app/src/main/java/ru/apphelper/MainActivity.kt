@@ -42,6 +42,9 @@ import ru.apphelper.contacts.ContactInsertHelper
 import ru.apphelper.data.UserProfileStore
 import ru.apphelper.dialog.VoiceCommand
 import ru.apphelper.dialog.VoiceCommandRouter
+import ru.apphelper.dialog.VoiceEvent
+import ru.apphelper.dialog.VoiceInteractionReducer
+import ru.apphelper.dialog.VoicePhase
 import ru.apphelper.domain.UserProfile
 import ru.apphelper.journal.EventJournal
 import ru.apphelper.journal.JournalEventType
@@ -93,6 +96,7 @@ class MainActivity : ComponentActivity() {
                     )
                 }
                 var voiceError by remember { mutableStateOf<String?>(null) }
+                var voicePhase by remember { mutableStateOf<VoicePhase>(VoicePhase.Idle) }
                 var messageQueue by remember { mutableStateOf(MessageQueue.fromNewestFirst(NotificationEventStore.snapshot())) }
                 var latestEvent by remember { mutableStateOf<NotificationEvent?>(messageQueue.selected) }
                 var currentMessageSession by remember { mutableStateOf<CurrentMessageSession?>(null) }
@@ -120,9 +124,14 @@ class MainActivity : ComponentActivity() {
 
                 fun speakAndListen(prompt: String) {
                     lastPrompt = prompt
+                    voicePhase = VoiceInteractionReducer.reduce(voicePhase, VoiceEvent.Prompt(prompt))
+                    voiceError = null
                     voice.setSpeechRate(if (profile.speech.slowerSpeech) 0.78f else 1.0f)
                     voice.speak(prompt) {
-                        if (microphoneGranted) voice.startListening()
+                        if (microphoneGranted) {
+                            voicePhase = VoiceInteractionReducer.reduce(voicePhase, VoiceEvent.SpeechFinished)
+                            voice.startListening()
+                        }
                     }
                 }
 
@@ -344,6 +353,8 @@ class MainActivity : ComponentActivity() {
                 }
 
                 fun handleRecognized(recognized: String) {
+                    voicePhase = VoiceInteractionReducer.reduce(voicePhase, VoiceEvent.Recognized(recognized))
+                    voiceError = null
                     if (awaitingContactName) {
                         val name = recognized.trim()
                         if (name.isBlank()) askContactName() else openContactForm(name)
@@ -445,6 +456,9 @@ class MainActivity : ComponentActivity() {
                         onRecognized = ::handleRecognized,
                         onError = { error ->
                             voiceError = error
+                            voicePhase = VoiceInteractionReducer.reduce(
+                                voicePhase, VoiceEvent.RecognitionFailed(error),
+                            )
                             // Keep message/session state for retry rather than discarding context.
                         },
                     )
@@ -591,7 +605,11 @@ class MainActivity : ComponentActivity() {
                                 else microphoneLauncher.launch(Manifest.permission.RECORD_AUDIO)
                             },
                             onListen = {
-                                if (!microphoneGranted) {
+                                val recoverable = voicePhase as? VoicePhase.RecoverableError
+                                if (recoverable != null && microphoneGranted) {
+                                    voicePhase = VoiceInteractionReducer.reduce(voicePhase, VoiceEvent.Retry)
+                                    speakAndListen(recoverable.prompt)
+                                } else if (!microphoneGranted) {
                                     microphoneLauncher.launch(Manifest.permission.RECORD_AUDIO)
                                 } else if (pendingUnknownCaller != null) {
                                     askAboutUnknownCaller()
