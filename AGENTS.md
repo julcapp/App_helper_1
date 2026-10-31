@@ -75,3 +75,6 @@ Implement requirements I18N-SOS-01..09 in docs/TECHNICAL_SPECIFICATION.md when c
 
 ## International subscription pricing
 Approved: after one shared 90-day trial, Russian regional subscription is RUB 950/month and outside-Russia subscription is USD 19.90/month. Keep one subscription across the user's devices; recurring billing requires separate consent. Billing region cannot be determined solely from GPS/SIM/IP, and international payment integration and region transition rules remain open. See BILL-INT-01..07 in docs/TECHNICAL_SPECIFICATION.md.
+
+## Voice interaction and billing region
+See VOICE-01..14 and BILL-INT-08..09 in docs/TECHNICAL_SPECIFICATION.md. Preserve subscription currency during temporary travel and leave international payment integration undecided. Plan a safe first-launch STT/TTS/intent test flow without real communications. Do not claim real tests were performed. Codex implementation is postponed until user instruction.
