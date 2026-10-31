@@ -87,3 +87,6 @@ Long-term personal AI memory is OFF by default, enabled only through user choice
 
 ## Voice agents to be implemented via Codex
 The project owner approved using Codex to build the shared voice AI-agent platform with user-isolated profiles/memory. Implementation remains postponed pending an explicit launch instruction. Follow CODEX-VOICE-01..08 in docs/TECHNICAL_SPECIFICATION.md. Do not assert implementation/tests are complete. Keep medical SOS data local, AI memory opt-in, CRM observability metadata-only by default.
+
+## AI agents CRM admin dashboard
+See CRM-AI-01..11 in docs/TECHNICAL_SPECIFICATION.md: operational monitoring, STT/LLM/TTS provider configuration, limits, cost ledger, privacy-safe technical diagnosis, RBAC/audit, provider fallback and isolated tests. No raw conversations or memory in regular CRM logs. Implementation through Codex requires explicit later authorization.
