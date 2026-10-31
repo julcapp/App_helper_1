@@ -59,6 +59,8 @@ import ru.apphelper.messages.MessageFactsExtractor
 import ru.apphelper.notifications.NotificationEvent
 import ru.apphelper.notifications.NotificationEventStore
 import ru.apphelper.profile.ProfileTuningSession
+import ru.apphelper.ui.accessibility.AccessibleAction
+import ru.apphelper.ui.accessibility.AccessibleSection
 import ru.apphelper.ui.onboarding.AppHelperTheme
 import ru.apphelper.ui.onboarding.OnboardingFlow
 import ru.apphelper.voice.AndroidVoiceAssistant
@@ -644,90 +646,98 @@ private fun HomeScreen(
     onListen: () -> Unit,
     onSpeak: () -> Unit,
 ) {
+    var showTools by remember { mutableStateOf(false) }
+
     Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(24.dp),
-        verticalArrangement = Arrangement.spacedBy(18.dp),
+        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        Text("Помощник готов", fontSize = 30.sp)
-        Text("Профиль ${profile.displayName.ifBlank { "пользователя" }} активен.", fontSize = 20.sp)
+        AccessibleSection(
+            title = "Мой помощник",
+            description = "Нажмите «Говорить» или выберите действие ниже.",
+        )
 
-        Button(onClick = onListen, modifier = Modifier.fillMaxWidth().height(72.dp)) {
-            Text("Слушаю", fontSize = 22.sp)
-        }
-        Button(onClick = onTuneToMe, modifier = Modifier.fillMaxWidth().height(64.dp)) {
-            Text(if (tuningActive) "Настройка идёт…" else "Настройся под меня", fontSize = 20.sp)
-        }
-        Button(onClick = onMissed, modifier = Modifier.fillMaxWidth().height(64.dp)) {
-            Text("Что я пропустил?", fontSize = 20.sp)
+        // Primary action is always visible before technical or optional functionality.
+        AccessibleAction(
+            label = "Говорить",
+            accessibilityLabel = "Говорить с помощником. Двойное нажатие для начала.",
+            onClick = onListen,
+            primary = true,
+        )
+
+        if (latestEvent != null) {
+            AccessibleSection(
+                title = "Новое сообщение",
+                description = "Источник: ${latestEvent.appName}. Отправитель: ${latestEvent.sender}.",
+            )
+            AccessibleAction(
+                label = "Прочитать вслух",
+                accessibilityLabel = "Прочитать доступный текст нового уведомления вслух",
+                onClick = onReadNotification,
+            )
+            AccessibleAction(label = "Позже", onClick = onLater)
         }
 
-        if (!locationGranted) {
-            Button(onClick = onRequestLocation, modifier = Modifier.fillMaxWidth().height(64.dp)) {
-                Text("Разрешить геолокацию", fontSize = 18.sp)
-            }
-        } else {
-            Button(onClick = onWhereAmI, modifier = Modifier.fillMaxWidth().height(64.dp)) {
-                Text("Где я?", fontSize = 20.sp)
-            }
-            Button(onClick = onSaveHome, modifier = Modifier.fillMaxWidth().height(64.dp)) {
-                Text(if (safeHome == null) "Запомнить это место как дом" else "Обновить точку Дом", fontSize = 18.sp)
-            }
+        AccessibleAction(label = "Что я пропустил?", onClick = onMissed)
+
+        if (voiceError != null) {
+            AccessibleSection(title = "Не удалось распознать речь", description = voiceError)
+            AccessibleAction(label = "Попробовать снова", onClick = onListen)
         }
-        if (safeHome != null) {
-            Button(onClick = onNavigateHome, modifier = Modifier.fillMaxWidth().height(64.dp)) {
-                Text("Отведи меня домой", fontSize = 20.sp)
-            }
+
+        if (pendingUnknownCaller != null) {
+            AccessibleSection(
+                title = "Неизвестный номер",
+                description = pendingUnknownCaller.phoneNumber,
+            )
+            AccessibleAction(label = "Сохранить контакт", onClick = onSaveUnknown)
         }
-        lastKnownLocation?.let { location ->
-            Text(
-                "Последняя позиция: ${String.format(Locale.US, "%.5f", location.latitude)}, " +
-                    String.format(Locale.US, "%.5f", location.longitude),
-                fontSize = 16.sp,
+
+        if (latestCall != null) {
+            AccessibleSection(
+                title = "Последний звонок",
+                description = latestCall.displayName
+                    ?: latestCall.phoneNumber.ifBlank { "Неизвестный номер" },
             )
         }
 
-        pendingUnknownCaller?.let { caller ->
-            Text("Неизвестный номер", fontSize = 24.sp)
-            Text(caller.phoneNumber, fontSize = 20.sp)
-            Button(onClick = onSaveUnknown, modifier = Modifier.fillMaxWidth().height(64.dp)) {
-                Text("Сохранить в контакты", fontSize = 20.sp)
-            }
-        }
+        AccessibleAction(
+            label = if (showTools) "Скрыть дополнительные функции" else "Помощь и дополнительные функции",
+            onClick = { showTools = !showTools },
+        )
 
-        Button(onClick = onEnableNotificationAccess, modifier = Modifier.fillMaxWidth().height(64.dp)) {
-            Text("Разрешить доступ к уведомлениям", fontSize = 18.sp)
-        }
-        if (!contactsGranted) {
-            Button(onClick = onRequestContacts, modifier = Modifier.fillMaxWidth().height(64.dp)) {
-                Text("Разрешить доступ к контактам", fontSize = 18.sp)
+        if (showTools) {
+            AccessibleSection(
+                title = "Дополнительные функции",
+                description = "Выберите только то, что вам нужно. Разрешения можно настроить позже.",
+            )
+            AccessibleAction(
+                label = if (tuningActive) "Идёт настройка" else "Настроить помощника под меня",
+                onClick = onTuneToMe,
+            )
+            if (!locationGranted) {
+                AccessibleAction(label = "Включить определение местоположения", onClick = onRequestLocation)
+            } else {
+                AccessibleAction(label = "Где я?", onClick = onWhereAmI)
+                AccessibleAction(
+                    label = if (safeHome == null) "Запомнить место как дом" else "Обновить место «Дом»",
+                    onClick = onSaveHome,
+                )
+            }
+            if (safeHome != null) AccessibleAction(label = "Показать дорогу домой", onClick = onNavigateHome)
+            AccessibleAction(label = "Настроить чтение уведомлений", onClick = onEnableNotificationAccess)
+            if (!contactsGranted) AccessibleAction(label = "Разрешить доступ к контактам", onClick = onRequestContacts)
+            AccessibleAction(label = "Настроить определитель звонков", onClick = onRequestCallScreeningRole)
+            AccessibleAction(label = "Проверить голос помощника", onClick = onSpeak)
+            // Coordinates are diagnostic data, not the primary answer to "Where am I?".
+            if (lastKnownLocation != null) {
+                Text(
+                    "Последние координаты: " +
+                        String.format(Locale.US, "%.5f", lastKnownLocation.latitude) + ", " +
+                        String.format(Locale.US, "%.5f", lastKnownLocation.longitude),
+                    style = androidx.compose.material3.MaterialTheme.typography.bodyMedium,
+                )
             }
         }
-        Button(onClick = onRequestCallScreeningRole, modifier = Modifier.fillMaxWidth().height(64.dp)) {
-            Text("Включить определитель звонков", fontSize = 18.sp)
-        }
-
-        latestCall?.let { call ->
-            Text("Последний звонок", fontSize = 24.sp)
-            Text(call.displayName ?: call.phoneNumber.ifBlank { "Неизвестный номер" }, fontSize = 20.sp)
-        }
-        latestEvent?.let { event ->
-            Text("Новое уведомление", fontSize = 24.sp)
-            Text("${event.appName}: ${event.sender}", fontSize = 20.sp)
-            if (event.text.isNotBlank()) Text(event.text, fontSize = 18.sp)
-            Button(onClick = onReadNotification, modifier = Modifier.fillMaxWidth().height(64.dp)) {
-                Text("Прочитать", fontSize = 20.sp)
-            }
-            Button(onClick = onLater, modifier = Modifier.fillMaxWidth().height(64.dp)) {
-                Text("Позже", fontSize = 20.sp)
-            }
-        }
-
-        Button(onClick = onSpeak, modifier = Modifier.fillMaxWidth().height(60.dp)) {
-            Text("Проверить голос", fontSize = 20.sp)
-        }
-        voiceError?.let { Text(it) }
     }
 }
