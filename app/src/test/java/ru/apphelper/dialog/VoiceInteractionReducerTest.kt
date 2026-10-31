@@ -44,4 +44,25 @@ class VoiceInteractionReducerTest {
         assertEquals("Прочитать?", second.prompt)
         assertEquals(1, second.retries)
     }
+
+    @Test fun lateSpeechCallbackAfterCancelDoesNotRestartAction() {
+        val cancelled = VoiceInteractionReducer.reduce(
+            VoicePhase.AwaitingSpeech("Прочитать?"), VoiceEvent.Cancel,
+        )
+        assertEquals(VoicePhase.Idle, VoiceInteractionReducer.reduce(
+            cancelled, VoiceEvent.Recognized("да"),
+        ))
+        assertEquals(VoicePhase.Idle, VoiceInteractionReducer.reduce(
+            cancelled, VoiceEvent.RecognitionFailed("Поздняя ошибка"),
+        ))
+    }
+
+    @Test fun secondResultAfterProcessingIsIgnored() {
+        val processing = VoiceInteractionReducer.reduce(
+            VoicePhase.AwaitingSpeech("Прочитать?"), VoiceEvent.Recognized("да"),
+        )
+        assertEquals(processing, VoiceInteractionReducer.reduce(
+            processing, VoiceEvent.Recognized("отправить"),
+        ))
+    }
 }
