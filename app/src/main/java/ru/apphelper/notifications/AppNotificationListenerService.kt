@@ -4,6 +4,7 @@ import android.app.Notification
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import ru.apphelper.journal.EventJournal
+import ru.apphelper.channels.AndroidReplyCapability
 import ru.apphelper.channels.MessageChannelRegistry
 import ru.apphelper.channels.MessageChannel
 
@@ -28,6 +29,7 @@ class AppNotificationListenerService : NotificationListenerService() {
         val channel = MessageChannelRegistry.detect(status.packageName)
         val channelName = if (channel == MessageChannel.OTHER) appName else MessageChannelRegistry.label(channel)
 
+        val quickReply = AndroidReplyCapability.inspect(status.key, status.packageName, status.notification)
         val event = NotificationEvent(
             id = status.key,
             packageName = status.packageName,
@@ -35,6 +37,7 @@ class AppNotificationListenerService : NotificationListenerService() {
             sender = title.ifBlank { appName },
             text = body,
             receivedAt = status.postTime,
+            quickReplyAvailable = quickReply.hasTextReply,
         )
 
         EventJournal(this).appendNotification(event)
