@@ -1,0 +1,51 @@
+name: Android verification
+
+on:
+  push:
+    branches:
+      - ux/discovery-accessibility-2026-10
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Configure Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android platform
+        run: sdkmanager "platforms;android-37" "build-tools;36.0.0" "platform-tools"
+
+      - name: Configure Gradle 9.5
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          gradle-version: '9.5.0'
+
+      - name: Compile, unit tests and lint
+        run: gradle --no-daemon :app:assembleDebug :app:testDebugUnitTest :app:lintDebug --stacktrace
+
+      - name: Upload diagnostic reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-reports
+          if-no-files-found: ignore
+          path: |
+            app/build/reports/**
+            app/build/test-results/**
