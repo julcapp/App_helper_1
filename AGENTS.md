@@ -78,3 +78,6 @@ Approved: after one shared 90-day trial, Russian regional subscription is RUB 95
 
 ## Voice interaction and billing region
 See VOICE-01..14 and BILL-INT-08..09 in docs/TECHNICAL_SPECIFICATION.md. Preserve subscription currency during temporary travel and leave international payment integration undecided. Plan a safe first-launch STT/TTS/intent test flow without real communications. Do not claim real tests were performed. Codex implementation is postponed until user instruction.
+
+## Foreign payment candidates and crypto restrictions
+Foreign USD 19.90 subscription: CloudPayments and Robokassa are candidate providers, not yet selected or enabled. Owner requests future USDT/BTC acceptance; treat as feasibility/legal review only, never enable or promise cryptocurrency subscription payments until lawful merchant/jurisdiction/store rules are established. See PAY-FOREIGN-01..06 in docs/TECHNICAL_SPECIFICATION.md. Recurring payments require opt-in and server-verified status.
