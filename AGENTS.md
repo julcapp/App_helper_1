@@ -36,3 +36,6 @@ Implement user-level billing shared across up to 2–3 linked devices; design co
 
 ## Referral program
 Implement a configurable, versioned per-user referral program as specified in docs/TECHNICAL_SPECIFICATION.md (REF-01..11). Users share personal invite links; the inviter earns 50% off their next paid subscription period only after the invitee's first confirmed payment. No discounts on signup/trial; prevent double-awards, self-referrals, sensitive-data leaks, and unauthorized discount stacking. Terms not yet settled must be flagged for approval, not silently invented.
+
+## Notes and product feedback
+Implement the user-facing 'Мои мысли и предложения' module according to FB-01..11 in docs/TECHNICAL_SPECIFICATION.md. Written or dictated notes remain private by default; sending text to CRM for internal AI analysis requires a separate explicit user action and review. Preserve accessibility, privacy, provenance, role-based CRM access and human review of AI categorization. Never silently upload all personal notes.
