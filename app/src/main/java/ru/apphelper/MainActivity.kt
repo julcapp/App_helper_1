@@ -92,9 +92,8 @@ class MainActivity : ComponentActivity() {
                     )
                 }
                 var voiceError by remember { mutableStateOf<String?>(null) }
-                var latestEvent by remember {
-                    mutableStateOf<NotificationEvent?>(NotificationEventStore.snapshot().firstOrNull())
-                }
+                var pendingMessages by remember { mutableStateOf(NotificationEventStore.snapshot().asReversed()) }
+                var latestEvent by remember { mutableStateOf<NotificationEvent?>(pendingMessages.firstOrNull()) }
                 var currentMessageSession by remember { mutableStateOf<CurrentMessageSession?>(null) }
                 var latestCall by remember { mutableStateOf<CallEvent?>(null) }
                 var pendingUnknownCaller by remember {
@@ -202,10 +201,15 @@ class MainActivity : ComponentActivity() {
                 }
 
                 fun closeCurrentMessage() {
+                    val completedId = currentMessageSession?.event?.id ?: latestEvent?.id
+                    pendingMessages = pendingMessages.filterNot { it.id == completedId }
                     awaitingMessageFollowUp = false
                     currentMessageSession = null
-                    latestEvent = null
-                    speak("Хорошо. Закрываю это сообщение.")
+                    latestEvent = pendingMessages.firstOrNull()
+                    val next = latestEvent
+                    if (next != null) {
+                        speakAndListenNotification("Следующее сообщение в ${next.appName} от ${next.sender}. Прочитать?")
+                    } else speak("Сообщение закрыто.")
                 }
 
                 fun answerMessageFact(command: MessageFactCommand) {
@@ -386,7 +390,7 @@ class MainActivity : ComponentActivity() {
                             VoiceCommand.READ -> readLatestNotification()
                             VoiceCommand.LATER -> {
                                 awaitingNotificationCommand = false
-                                latestEvent = null
+                                latestEvent = pendingMessages.firstOrNull { it.id != latestEvent?.id }
                                 speak("Хорошо. Оставлю на потом.")
                             }
                             VoiceCommand.REPEAT -> lastPrompt?.let(::speakAndListenNotification)
@@ -439,23 +443,23 @@ class MainActivity : ComponentActivity() {
                         onRecognized = ::handleRecognized,
                         onError = { error ->
                             voiceError = error
-                            awaitingNotificationCommand = false
-                            awaitingMessageFollowUp = false
-                            awaitingUnknownCallerConfirmation = false
-                            awaitingContactName = false
-                            listeningForGeneralCommand = false
+                            // Keep message/session state for retry rather than discarding context.
                         },
                     )
                 }
 
                 DisposableEffect(Unit) {
                     val notificationListener: (NotificationEvent) -> Unit = { event ->
-                        latestEvent = event
-                        currentMessageSession = null
-                        awaitingMessageFollowUp = false
-                        val sender = event.sender.ifBlank { event.appName }
-                        val prompt = "Новое сообщение в ${event.appName} от $sender. Прочитать?"
-                        if (microphoneGranted) speakAndListenNotification(prompt) else speak(prompt)
+                        if (pendingMessages.none { it.id == event.id }) {
+                            pendingMessages = pendingMessages + event
+                        }
+                        if (currentMessageSession == null && !awaitingNotificationCommand) {
+                            latestEvent = pendingMessages.firstOrNull()
+                            val selected = latestEvent ?: event
+                            val sender = selected.sender.ifBlank { selected.appName }
+                            val prompt = "Новое сообщение в ${selected.appName} от $sender. Прочитать?"
+                            if (microphoneGranted) speakAndListenNotification(prompt) else speak(prompt)
+                        }
                     }
                     val callListener: (CallEvent) -> Unit = { event ->
                         latestCall = event
@@ -568,7 +572,7 @@ class MainActivity : ComponentActivity() {
                                 awaitingNotificationCommand = false
                                 awaitingMessageFollowUp = false
                                 currentMessageSession = null
-                                latestEvent = null
+                                latestEvent = pendingMessages.firstOrNull { it.id != latestEvent?.id }
                             },
                             onMissed = { speakMissedEvents() },
                             onWhereAmI = { tellWhereAmI() },
