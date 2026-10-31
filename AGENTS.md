@@ -30,3 +30,6 @@ Support ESIA (Gosuslugi) as an optional future identity provider only. Integrati
 
 ## Local biometric sign-in
 After successful provider login, offer optional fast re-entry with system Android BiometricPrompt and appropriate device credential fallback. Use Android Keystore for secured session keys; never access or store biometric templates. Server session validity and subscription status must still be checked. Follow AUTH-BIO-01..06 in docs/TECHNICAL_SPECIFICATION.md.
+
+## Multiple devices and one subscription
+Implement user-level billing shared across up to 2–3 linked devices; design configurable max_devices (3 proposed pending final cap). New devices require secure pairing with a newly generated six-digit PIN valid for 3 minutes, displayed on an existing authenticated device, bounded attempts, single use, revocation and safe account recovery. Never treat the PIN alone as authentication. See DEV-01..11 in the technical specification.
