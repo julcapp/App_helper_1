@@ -30,4 +30,18 @@ class VoiceInteractionReducerTest {
     @Test fun strayRecognitionCannotPerformAction() {
         assertEquals(VoicePhase.Idle, VoiceInteractionReducer.reduce(VoicePhase.Idle, VoiceEvent.Recognized("Отправь")))
     }
+
+    @Test fun consecutiveFailuresRemainRecoverable() {
+        val first = VoiceInteractionReducer.reduce(
+            VoicePhase.AwaitingSpeech("Прочитать?"),
+            VoiceEvent.RecognitionFailed("Тишина"),
+        ) as VoicePhase.RecoverableError
+        val retry = VoiceInteractionReducer.reduce(first, VoiceEvent.Retry)
+        val listening = VoiceInteractionReducer.reduce(retry, VoiceEvent.SpeechFinished)
+        val second = VoiceInteractionReducer.reduce(
+            listening, VoiceEvent.RecognitionFailed("Тишина"),
+        ) as VoicePhase.RecoverableError
+        assertEquals("Прочитать?", second.prompt)
+        assertEquals(1, second.retries)
+    }
 }
