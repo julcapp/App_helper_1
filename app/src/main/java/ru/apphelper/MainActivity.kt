@@ -792,6 +792,14 @@ private fun HomeScreen(
                 title = "Работа с сообщением",
                 description = "От: ${currentMessage.sender}. Источник: ${currentMessage.source}.",
             )
+            AccessibleSection(
+                title = "Возможность быстрого ответа",
+                description = if (currentMessage.event.quickReplyAvailable) {
+                    "В уведомлении обнаружено действие ответа. Отправка пока отключена."
+                } else {
+                    "В этом уведомлении быстрый ответ не обнаружен."
+                },
+            )
             AccessibleAction(label = "Прочитать ещё раз", onClick = onRepeatMessage)
             AccessibleAction(label = "Объяснить простыми словами", onClick = onExplainMessage)
             AccessibleAction(label = "Что главное?", onClick = onMainPoint)
