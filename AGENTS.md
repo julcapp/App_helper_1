@@ -24,3 +24,6 @@ Read `docs/SUBSCRIPTIONS_CRM_REQUIREMENTS.md` for the confirmed **90-day trial c
 - Drafts never send automatically. Require an actually verified available transport, exact channel/recipient/text, user confirmation, and accurate delivery-status semantics.
 - Do not claim successful build or device tests without logs.
 - Report files changed, tests run, results and remaining risks.
+
+## ESIA / Gosuslugi
+Support ESIA (Gosuslugi) as an optional future identity provider only. Integration requires verified eligibility, registration, compliance and credentials. Feature flag OFF until access is approved and tested. Never ask for or store Gosuslugi passwords, SNILS or passport details without an independently approved, necessary purpose. Maintain a non-ESIA authentication path.
