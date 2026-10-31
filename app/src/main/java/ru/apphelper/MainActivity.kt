@@ -22,6 +22,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -60,6 +61,7 @@ import ru.apphelper.messages.MessageAnalysis
 import ru.apphelper.messages.MessageFactCommand
 import ru.apphelper.messages.MessageFactsExtractor
 import ru.apphelper.messages.MessageQueue
+import ru.apphelper.messages.ReplyDraft
 import ru.apphelper.notifications.NotificationEvent
 import ru.apphelper.notifications.NotificationEventStore
 import ru.apphelper.profile.ProfileTuningSession
@@ -100,6 +102,7 @@ class MainActivity : ComponentActivity() {
                 var messageQueue by remember { mutableStateOf(MessageQueue.fromNewestFirst(NotificationEventStore.snapshot())) }
                 var latestEvent by remember { mutableStateOf<NotificationEvent?>(messageQueue.selected) }
                 var currentMessageSession by remember { mutableStateOf<CurrentMessageSession?>(null) }
+                var replyDraft by remember { mutableStateOf<ReplyDraft?>(null) }
                 var latestCall by remember { mutableStateOf<CallEvent?>(null) }
                 var pendingUnknownCaller by remember {
                     mutableStateOf<PendingUnknownCaller?>(unknownCallerStore.load())
@@ -197,6 +200,7 @@ class MainActivity : ComponentActivity() {
                     latestEvent?.let { event ->
                         awaitingNotificationCommand = false
                         currentMessageSession = CurrentMessageSession(event)
+                        replyDraft = null
                         awaitingMessageFollowUp = true
                         val spoken = if (event.text.isBlank()) {
                             "В уведомлении нет доступного текста."
@@ -215,6 +219,7 @@ class MainActivity : ComponentActivity() {
                     messageQueue = messageQueue.dismiss(completedId)
                     awaitingMessageFollowUp = false
                     currentMessageSession = null
+                    replyDraft = null
                     latestEvent = messageQueue.selected
                     val next = latestEvent
                     if (next != null) {
@@ -591,6 +596,20 @@ class MainActivity : ComponentActivity() {
                                 }
                             },
                             currentMessage = currentMessageSession,
+                            replyDraft = replyDraft,
+                            onStartDraft = {
+                                currentMessageSession?.let { session ->
+                                    replyDraft = ReplyDraft(session.event.id, session.source, session.sender)
+                                }
+                            },
+                            onDraftTextChange = { value -> replyDraft = replyDraft?.edit(value) },
+                            onReviewDraft = {
+                                replyDraft = replyDraft?.markReviewed()
+                                replyDraft?.takeIf { it.reviewed }?.let {
+                                    speak("Черновик для ${it.displayedSender}. Текст: ${it.text}. Это только черновик, отправка недоступна.")
+                                }
+                            },
+                            onDiscardDraft = { replyDraft = null },
                             onReadNotification = { readLatestNotification() },
                             onRepeatMessage = { repeatCurrentMessage() },
                             onExplainMessage = { analyzeCurrentMessage(VoiceCommand.EXPLAIN_MESSAGE) },
@@ -681,6 +700,11 @@ private fun HomeScreen(
     profile: UserProfile,
     latestEvent: NotificationEvent?,
     currentMessage: CurrentMessageSession?,
+    replyDraft: ReplyDraft?,
+    onStartDraft: () -> Unit,
+    onDraftTextChange: (String) -> Unit,
+    onReviewDraft: () -> Unit,
+    onDiscardDraft: () -> Unit,
     latestCall: CallEvent?,
     pendingUnknownCaller: PendingUnknownCaller?,
     safeHome: SafeLocation?,
@@ -740,6 +764,25 @@ private fun HomeScreen(
             AccessibleAction(label = "Прочитать ещё раз", onClick = onRepeatMessage)
             AccessibleAction(label = "Объяснить простыми словами", onClick = onExplainMessage)
             AccessibleAction(label = "Что главное?", onClick = onMainPoint)
+            if (replyDraft == null) {
+                AccessibleAction(label = "Подготовить ответ", onClick = onStartDraft)
+            } else {
+                AccessibleSection(
+                    title = "Черновик ответа",
+                    description = "Получатель не подтверждён: ${replyDraft.displayedSender}. Отправка пока недоступна.",
+                )
+                OutlinedTextField(
+                    value = replyDraft.text,
+                    onValueChange = onDraftTextChange,
+                    label = { Text("Текст ответа") },
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 3,
+                )
+                if (replyDraft.canReview) {
+                    AccessibleAction(label = "Прочитать черновик", onClick = onReviewDraft)
+                }
+                AccessibleAction(label = "Отменить черновик", onClick = onDiscardDraft)
+            }
             AccessibleAction(label = "Закрыть сообщение", onClick = onCloseMessage)
         } else if (latestEvent != null) {
             AccessibleSection(
