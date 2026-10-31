@@ -262,12 +262,16 @@ class MainActivity : ComponentActivity() {
                     messageAnalysisProvider.analyze(
                         originalText = session.originalText,
                         onSuccess = { analysis ->
-                            awaitingMessageFollowUp = true
-                            speakAndListen(formatAnalysis(command, analysis))
+                            if (currentMessageSession?.event?.id == session.event.id) {
+                                awaitingMessageFollowUp = true
+                                speakAndListen(formatAnalysis(command, analysis))
+                            }
                         },
                         onError = { error ->
-                            awaitingMessageFollowUp = true
-                            speakAndListen(error)
+                            if (currentMessageSession?.event?.id == session.event.id) {
+                                awaitingMessageFollowUp = true
+                                speakAndListen(error)
+                            }
                         },
                     )
                 }
@@ -586,7 +590,12 @@ class MainActivity : ComponentActivity() {
                                     speak("Определитель звонков требует Android 10 или новее.")
                                 }
                             },
+                            currentMessage = currentMessageSession,
                             onReadNotification = { readLatestNotification() },
+                            onRepeatMessage = { repeatCurrentMessage() },
+                            onExplainMessage = { analyzeCurrentMessage(VoiceCommand.EXPLAIN_MESSAGE) },
+                            onMainPoint = { analyzeCurrentMessage(VoiceCommand.MESSAGE_MAIN_POINT) },
+                            onCloseMessage = { closeCurrentMessage() },
                             onLater = {
                                 awaitingNotificationCommand = false
                                 awaitingMessageFollowUp = false
@@ -671,6 +680,7 @@ class MainActivity : ComponentActivity() {
 private fun HomeScreen(
     profile: UserProfile,
     latestEvent: NotificationEvent?,
+    currentMessage: CurrentMessageSession?,
     latestCall: CallEvent?,
     pendingUnknownCaller: PendingUnknownCaller?,
     safeHome: SafeLocation?,
@@ -684,6 +694,10 @@ private fun HomeScreen(
     onRequestLocation: () -> Unit,
     onRequestCallScreeningRole: () -> Unit,
     onReadNotification: () -> Unit,
+    onRepeatMessage: () -> Unit,
+    onExplainMessage: () -> Unit,
+    onMainPoint: () -> Unit,
+    onCloseMessage: () -> Unit,
     onLater: () -> Unit,
     onMissed: () -> Unit,
     onWhereAmI: () -> Unit,
@@ -718,7 +732,16 @@ private fun HomeScreen(
         AccessibleAction(label = "Повторить вопрос", onClick = onRepeat)
         AccessibleAction(label = "Отмена", onClick = onCancelVoice)
 
-        if (latestEvent != null) {
+        if (currentMessage != null) {
+            AccessibleSection(
+                title = "Работа с сообщением",
+                description = "От: ${currentMessage.sender}. Источник: ${currentMessage.source}.",
+            )
+            AccessibleAction(label = "Прочитать ещё раз", onClick = onRepeatMessage)
+            AccessibleAction(label = "Объяснить простыми словами", onClick = onExplainMessage)
+            AccessibleAction(label = "Что главное?", onClick = onMainPoint)
+            AccessibleAction(label = "Закрыть сообщение", onClick = onCloseMessage)
+        } else if (latestEvent != null) {
             AccessibleSection(
                 title = "Новое сообщение",
                 description = "Источник: ${latestEvent.appName}. Отправитель: ${latestEvent.sender}.",
