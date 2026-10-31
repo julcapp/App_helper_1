@@ -107,7 +107,12 @@ class AndroidVoiceAssistant(
     }
 
     override fun stopListening() {
-        recognizer?.stopListening()
+        recognizer?.cancel()
+    }
+
+    fun stopSpeaking() {
+        completionCallbacks.clear()
+        tts.stop()
     }
 
     override fun release() {
