@@ -51,3 +51,6 @@ Users choose Google Maps, Yandex Maps or 2GIS. Persist preference per account an
 
 ## Emergency assistance design
 Review SOS-01..10 in docs/TECHNICAL_SPECIFICATION.md. Distinguish emergency system calling from trusted-person alerts, never assert delivery before acknowledgment, never guarantee rescue, preserve TalkBack and non-network fallbacks, and do not gate emergency calling on a paid subscription. This remains a design requirement; do not implement without later user instruction.
+
+## SOS subscription exception
+User approved: system emergency-service calling must remain accessible even after subscription expiry, without requiring active billing. See SOS-11..15 in docs/TECHNICAL_SPECIFICATION.md. Trusted-person onboarding/delivery details remain proposals pending approval.
