@@ -84,3 +84,6 @@ Foreign USD 19.90 subscription: CloudPayments and Robokassa are candidate provid
 
 ## Approved opt-in memory behavior
 Long-term personal AI memory is OFF by default, enabled only through user choice during onboarding or later. Language, accessibility and map preferences persist independently of AI memory. Users can inspect, correct, delete and disable AI memory; medical SOS passport and OMS fields never sync. See MEM-12..17 in technical specification. Codex remains postponed.
+
+## Voice agents to be implemented via Codex
+The project owner approved using Codex to build the shared voice AI-agent platform with user-isolated profiles/memory. Implementation remains postponed pending an explicit launch instruction. Follow CODEX-VOICE-01..08 in docs/TECHNICAL_SPECIFICATION.md. Do not assert implementation/tests are complete. Keep medical SOS data local, AI memory opt-in, CRM observability metadata-only by default.
