@@ -56,6 +56,7 @@ import ru.apphelper.messages.HttpMessageAnalysisProvider
 import ru.apphelper.messages.MessageAnalysis
 import ru.apphelper.messages.MessageFactCommand
 import ru.apphelper.messages.MessageFactsExtractor
+import ru.apphelper.messages.MessageQueue
 import ru.apphelper.notifications.NotificationEvent
 import ru.apphelper.notifications.NotificationEventStore
 import ru.apphelper.profile.ProfileTuningSession
@@ -92,8 +93,8 @@ class MainActivity : ComponentActivity() {
                     )
                 }
                 var voiceError by remember { mutableStateOf<String?>(null) }
-                var pendingMessages by remember { mutableStateOf(NotificationEventStore.snapshot().asReversed()) }
-                var latestEvent by remember { mutableStateOf<NotificationEvent?>(pendingMessages.firstOrNull()) }
+                var messageQueue by remember { mutableStateOf(MessageQueue.fromNewestFirst(NotificationEventStore.snapshot())) }
+                var latestEvent by remember { mutableStateOf<NotificationEvent?>(messageQueue.selected) }
                 var currentMessageSession by remember { mutableStateOf<CurrentMessageSession?>(null) }
                 var latestCall by remember { mutableStateOf<CallEvent?>(null) }
                 var pendingUnknownCaller by remember {
@@ -202,10 +203,10 @@ class MainActivity : ComponentActivity() {
 
                 fun closeCurrentMessage() {
                     val completedId = currentMessageSession?.event?.id ?: latestEvent?.id
-                    pendingMessages = pendingMessages.filterNot { it.id == completedId }
+                    messageQueue = messageQueue.dismiss(completedId)
                     awaitingMessageFollowUp = false
                     currentMessageSession = null
-                    latestEvent = pendingMessages.firstOrNull()
+                    latestEvent = messageQueue.selected
                     val next = latestEvent
                     if (next != null) {
                         speakAndListenNotification("Следующее сообщение в ${next.appName} от ${next.sender}. Прочитать?")
@@ -390,7 +391,8 @@ class MainActivity : ComponentActivity() {
                             VoiceCommand.READ -> readLatestNotification()
                             VoiceCommand.LATER -> {
                                 awaitingNotificationCommand = false
-                                latestEvent = pendingMessages.firstOrNull { it.id != latestEvent?.id }
+                                messageQueue = messageQueue.dismiss(latestEvent?.id)
+                                latestEvent = messageQueue.selected
                                 speak("Хорошо. Оставлю на потом.")
                             }
                             VoiceCommand.REPEAT -> lastPrompt?.let(::speakAndListenNotification)
@@ -450,11 +452,9 @@ class MainActivity : ComponentActivity() {
 
                 DisposableEffect(Unit) {
                     val notificationListener: (NotificationEvent) -> Unit = { event ->
-                        if (pendingMessages.none { it.id == event.id }) {
-                            pendingMessages = pendingMessages + event
-                        }
+                        messageQueue = messageQueue.receive(event)
                         if (currentMessageSession == null && !awaitingNotificationCommand) {
-                            latestEvent = pendingMessages.firstOrNull()
+                            latestEvent = messageQueue.selected
                             val selected = latestEvent ?: event
                             val sender = selected.sender.ifBlank { selected.appName }
                             val prompt = "Новое сообщение в ${selected.appName} от $sender. Прочитать?"
@@ -572,7 +572,8 @@ class MainActivity : ComponentActivity() {
                                 awaitingNotificationCommand = false
                                 awaitingMessageFollowUp = false
                                 currentMessageSession = null
-                                latestEvent = pendingMessages.firstOrNull { it.id != latestEvent?.id }
+                                messageQueue = messageQueue.dismiss(latestEvent?.id)
+                                latestEvent = messageQueue.selected
                             },
                             onMissed = { speakMissedEvents() },
                             onWhereAmI = { tellWhereAmI() },
