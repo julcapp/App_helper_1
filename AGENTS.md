@@ -63,3 +63,6 @@ Review SOS-31..39 in docs/TECHNICAL_SPECIFICATION.md. After SOS contact notifica
 
 ## Local-only passport and medical insurance SOS fields
 See SOS-40..47 in docs/TECHNICAL_SPECIFICATION.md. Passport and OMS insurance number are strictly per-device encrypted local fields, with no CRM, server sync, backups, analytics, logs, push, or cross-device transfer. They may be shown to emergency responders when explicitly requested and only shared via an authorized, verified channel. Protect full document details from casual lockscreen exposure.
+
+## Persistent SOS entry points
+Approved: large Android home-screen SOS widget and optional persistent-notification shortcut subject to OS permissions. Opening the SOS menu does not itself send an alert; preserve accessible explicit call and trusted-contact options. See SOS-63..68 in docs/TECHNICAL_SPECIFICATION.md. Do not claim guaranteed lock-screen overlay.
