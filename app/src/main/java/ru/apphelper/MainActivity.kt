@@ -103,6 +103,7 @@ class MainActivity : ComponentActivity() {
                 var latestEvent by remember { mutableStateOf<NotificationEvent?>(messageQueue.selected) }
                 var currentMessageSession by remember { mutableStateOf<CurrentMessageSession?>(null) }
                 var replyDraft by remember { mutableStateOf<ReplyDraft?>(null) }
+                var awaitingDraftDictation by remember { mutableStateOf(false) }
                 var latestCall by remember { mutableStateOf<CallEvent?>(null) }
                 var pendingUnknownCaller by remember {
                     mutableStateOf<PendingUnknownCaller?>(unknownCallerStore.load())
@@ -201,6 +202,7 @@ class MainActivity : ComponentActivity() {
                         awaitingNotificationCommand = false
                         currentMessageSession = CurrentMessageSession(event)
                         replyDraft = null
+                        awaitingDraftDictation = false
                         awaitingMessageFollowUp = true
                         val spoken = if (event.text.isBlank()) {
                             "В уведомлении нет доступного текста."
@@ -366,6 +368,15 @@ class MainActivity : ComponentActivity() {
                     if (voicePhase !is VoicePhase.AwaitingSpeech) return
                     voicePhase = VoiceInteractionReducer.reduce(voicePhase, VoiceEvent.Recognized(recognized))
                     voiceError = null
+                    if (awaitingDraftDictation) {
+                        awaitingDraftDictation = false
+                        val draft = replyDraft
+                        if (draft != null && currentMessageSession?.event?.id == draft.sourceNotificationId) {
+                            replyDraft = draft.edit(recognized.trim())
+                            speak("Текст записан в черновик. Проверьте его перед дальнейшими действиями.")
+                        }
+                        return
+                    }
                     if (awaitingContactName) {
                         val name = recognized.trim()
                         if (name.isBlank()) askContactName() else openContactForm(name)
@@ -603,13 +614,20 @@ class MainActivity : ComponentActivity() {
                                 }
                             },
                             onDraftTextChange = { value -> replyDraft = replyDraft?.edit(value) },
+                            onDictateDraft = {
+                                if (!microphoneGranted) microphoneLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                else if (replyDraft != null) {
+                                    awaitingDraftDictation = true
+                                    speakAndListen("Продиктуйте полный текст ответа. Предыдущий текст будет заменён.")
+                                }
+                            },
                             onReviewDraft = {
                                 replyDraft = replyDraft?.markReviewed()
                                 replyDraft?.takeIf { it.reviewed }?.let {
                                     speak("Черновик для ${it.displayedSender}. Текст: ${it.text}. Это только черновик, отправка недоступна.")
                                 }
                             },
-                            onDiscardDraft = { replyDraft = null },
+                            onDiscardDraft = { replyDraft = null; awaitingDraftDictation = false },
                             onReadNotification = { readLatestNotification() },
                             onRepeatMessage = { repeatCurrentMessage() },
                             onExplainMessage = { analyzeCurrentMessage(VoiceCommand.EXPLAIN_MESSAGE) },
@@ -674,6 +692,7 @@ class MainActivity : ComponentActivity() {
                                 awaitingContactName = false
                                 listeningForGeneralCommand = false
                                 tuningSession = null
+                                awaitingDraftDictation = false
                                 speak("Действие отменено.")
                             },
                             onSpeak = {
@@ -703,6 +722,7 @@ private fun HomeScreen(
     replyDraft: ReplyDraft?,
     onStartDraft: () -> Unit,
     onDraftTextChange: (String) -> Unit,
+    onDictateDraft: () -> Unit,
     onReviewDraft: () -> Unit,
     onDiscardDraft: () -> Unit,
     latestCall: CallEvent?,
@@ -778,6 +798,7 @@ private fun HomeScreen(
                     modifier = Modifier.fillMaxWidth(),
                     minLines = 3,
                 )
+                AccessibleAction(label = "Продиктовать текст заново", onClick = onDictateDraft)
                 if (replyDraft.canReview) {
                     AccessibleAction(label = "Прочитать черновик", onClick = onReviewDraft)
                 }
