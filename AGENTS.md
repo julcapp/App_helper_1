@@ -57,3 +57,6 @@ User approved: system emergency-service calling must remain accessible even afte
 
 ## Emergency 112 two-mode concept
 See SOS-16..23 in docs/TECHNICAL_SPECIFICATION.md: max 3 trusted contacts; user chooses one or all. Standard voice 112 dialer and an editable personal emergency message for a user unable to speak. Automated playback twice into a cellular emergency call is a feasibility question, not an implemented or guaranteed Android capability. Never test against live emergency dispatch without formal coordination. Separate medical/SOS data from analytics.
+
+## Lock-screen emergency card and 112 agent feasibility
+Review SOS-31..39 in docs/TECHNICAL_SPECIFICATION.md. After SOS contact notification, display persistent emergency card on lock screen only where platform permits and provide bottom close control 'Помощь оказывается — закрыть'. Full-screen intent is restricted on modern Android. AI answering detection, TTS injection and dialogue with emergency 112 operator are future feasibility research requiring authorized telecom/emergency integration; no unsupported implementation claims, no live 112 test calls without approval.
