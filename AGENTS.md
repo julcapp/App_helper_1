@@ -66,3 +66,6 @@ See SOS-40..47 in docs/TECHNICAL_SPECIFICATION.md. Passport and OMS insurance nu
 
 ## Persistent SOS entry points
 Approved: large Android home-screen SOS widget and optional persistent-notification shortcut subject to OS permissions. Opening the SOS menu does not itself send an alert; preserve accessible explicit call and trusted-contact options. See SOS-63..68 in docs/TECHNICAL_SPECIFICATION.md. Do not claim guaranteed lock-screen overlay.
+
+## Internationalization and localized emergency dialing
+See I18N-01..02, PHONE-01 and SOS-69..74 in docs/TECHNICAL_SPECIFICATION.md. Support ru/en/es/zh-Hans/ar (RTL), country-specific E.164 contact-number formatting, and emergency calling according to current network/location rather than the account/SIM country code. Russian emergency number is 112 even for a foreign +375 account currently in Russia. Never prepend +country code to 112/911; do not assume all international numbers are 11 digits. No implementation requested yet.
