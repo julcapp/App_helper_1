@@ -34,12 +34,15 @@ class AndroidVoiceAssistant(
             override fun onStart(utteranceId: String?) = Unit
 
             override fun onError(utteranceId: String?) {
-                utteranceId?.let { completionCallbacks.remove(it) }
+                utteranceId?.let { id ->
+                    mainHandler.post { completionCallbacks.remove(id) }
+                }
             }
 
             override fun onDone(utteranceId: String?) {
-                val callback = utteranceId?.let { completionCallbacks.remove(it) } ?: return
-                mainHandler.post(callback)
+                mainHandler.post {
+                    utteranceId?.let { completionCallbacks.remove(it) }?.invoke()
+                }
             }
         })
 
@@ -60,7 +63,9 @@ class AndroidVoiceAssistant(
                 val values = results
                     ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                     .orEmpty()
-                values.firstOrNull()?.let(onRecognized)
+                val result = values.firstOrNull { it.isNotBlank() }
+                if (result == null) onError("Речь не распознана. Попробуйте ещё раз.")
+                else onRecognized(result)
             }
         })
     }
